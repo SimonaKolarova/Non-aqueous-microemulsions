@@ -1,0 +1,224 @@
+---
+title: "Model selection"
+author: "Simona Kolarova"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+# Aims
+- Compare the predictive performance of 4 machine learning models (i.e., Logistic regression, Random forest, Support vector machines and Neutral networks) on the phase bahaviour data\
+- Compare the predictive performance of the models on 2 phase behaviour datasets, in which the phase behaviour is classified at every vertex in a phase diagram with a grid of 5 pc (94 datapoints per phase diagram) or a grid of 2.5 pc (407 datapoints per phase diagram). 
+
+# Sources
+## Libraries
+```{r libraries}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(kernlab)
+library(nnet)
+library(pROC)
+library(doParallel)
+```
+
+## R script sources
+```{r r scripts}
+source("Machine learning algorithms.R", local = knitr::knit_global())
+source("Predictive performance assessment.R", local = knitr::knit_global())
+source("Statistical analysis.R", local = knitr::knit_global())
+```
+
+## Parallel processing
+```{r parallel processing}
+registerDoParallel(makeCluster(detectCores()-1))
+```
+
+## Datasets
+``` {r data}
+PB_predictors_25pc_step <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+PB_predictors_5pc_step <- read.csv("Data/Phase behaviour and descriptors (5 pc step).csv")
+```
+
+### Datasets splitting
+Both datasets were split into 2 training/testing(`TT_data`) and validation (`V_data`) datasets comprising the same 21 and 7 phase diagrams, respectively.
+``` {r data splitting}
+TT_data_25pc_step <- filter(PB_predictors_25pc_step, Set == "Training")
+V_data_25pc_step <- filter(PB_predictors_25pc_step, Set == "Validation")
+
+TT_data_5pc_step <- filter(PB_predictors_5pc_step, Set == "Training")
+V_data_5pc_step <- filter(PB_predictors_5pc_step, Set == "Validation")
+```
+
+### Dataset predictor and class level definition
+``` {r data definitions}
+predictors_all<-colnames(TT_data_25pc_step[,3:66][,-(4:6)])
+
+TT_data_25pc_step$Phase.behaviour<-factor(as.character(TT_data_25pc_step$Phase.behaviour))
+V_data_25pc_step$Phase.behaviour<-factor(as.character(V_data_25pc_step$Phase.behaviour))
+
+TT_data_5pc_step$Phase.behaviour<-factor(as.character(TT_data_5pc_step$Phase.behaviour))
+V_data_5pc_step$Phase.behaviour<-factor(as.character(V_data_5pc_step$Phase.behaviour))
+```
+
+# Predictive modelling 
+## Global parameters  
+_Summary_ and a _training control_ ('trainCtrl') functions to allow the uniform training and evaluation of the models.
+```{r controls}
+PMsummary <- function(...) c(twoClassSummary(...), defaultSummary(...))
+trainCtrl <- trainControl(method = "cv", number = 10,
+                          summaryFunction = PMsummary,classProbs = TRUE, savePredictions=TRUE)
+```
+
+```{r results dataframe, echo = FALSE}
+# Model evaluation dataframes
+model_performance_25pc_step <- data.frame(matrix(ncol = 17, nrow = 80))
+colnames(model_performance_25pc_step) <- c("Model", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Recall_testing", "F1_testing", "AUC_validation", "Accuracy_validation", "Kappa_validation", "Sensitivity_validation", "Specificity_validation", "Precision_validation", "Recall_validation", "F1_validation")
+model_performance_5pc_step <- model_performance_25pc_step
+```
+
+## Model training and evalution for 2.5 % step phase behaviour dataset
+```{r LR 2.5 pc}
+for (i in 1:20) {
+  model_performance_25pc_step <- run_logistic_regression(TT_data_25pc_step, V_data_25pc_step, predictors_all, model_performance_25pc_step,"Logistic regression", i)
+}
+```
+```{r RF 2.5 pc}
+for (i in 21:40) {
+  model_performance_25pc_step <- run_random_forest(TT_data_25pc_step, V_data_25pc_step, predictors_all, model_performance_25pc_step, "Random forest", i)
+}
+```
+```{r SVM 2.5 pc}
+for (i in 41:60) {
+  model_performance_25pc_step <- run_support_vector_machines(TT_data_25pc_step, V_data_25pc_step, predictors_all, model_performance_25pc_step, "Support vector machines", i)
+}
+```
+```{r NN 2.5 pc}
+for (i in 61:80) {
+  model_performance_25pc_step <- run_neural_network(TT_data_25pc_step, V_data_25pc_step, predictors_all, model_performance_25pc_step, "Neural network", i)
+}
+```
+
+## Model training and evalution for 5 % step phase behaviour dataset
+```{r LR 5 pc}
+for (i in 1:20) {
+  model_performance_5pc_step <- run_logistic_regression(TT_data_5pc_step, V_data_5pc_step, predictors_all, model_performance_5pc_step,"Logistic regression", i)
+}
+```
+```{r RF 5 pc}
+for (i in 21:40) {
+  model_performance_5pc_step <- run_random_forest(TT_data_5pc_step, V_data_5pc_step, predictors_all, model_performance_5pc_step, "Random forest", i)
+}
+```
+```{r SVM 5 pc}
+for (i in 41:60) {
+  model_performance_5pc_step <- run_support_vector_machines(TT_data_5pc_step, V_data_5pc_step, predictors_all, model_performance_5pc_step, "Support vector machines", i)
+}
+```
+```{r NN 5 pc}
+for (i in 61:80) {
+  model_performance_5pc_step <- run_neural_network(TT_data_5pc_step, V_data_5pc_step, predictors_all, model_performance_5pc_step, "Neural network", i)
+}
+```
+
+## Comparison of model performance metrics
+```{r performance metrics, echo = FALSE}
+model_performance_5pc_step$Model <- factor(model_performance_5pc_step$Model)
+model_performance_5pc_step$AUC_testing <- as.numeric(model_performance_5pc_step$AUC_testing)
+model_performance_5pc_step$AUC_validation <- as.numeric(model_performance_5pc_step$AUC_validation)
+
+model_performance_25pc_step$Model <- factor(model_performance_25pc_step$Model)
+model_performance_25pc_step$AUC_testing <- as.numeric(model_performance_25pc_step$AUC_testing)
+model_performance_25pc_step$AUC_validation <- as.numeric(model_performance_25pc_step$AUC_validation)
+```
+
+### Visial comparison
+```{r 2.5 pc models plot, fig.height=4, fig.width=10, echo=FALSE}
+ggplot(model_performance_25pc_step, aes(x = Model)) + 
+  geom_boxplot(aes(y=AUC_testing, colour = "AUC testing")) + 
+  geom_boxplot(aes(y=AUC_validation, colour = "AUC validation")) +
+  scale_x_discrete(limits=c("Logistic regression", "Random forest", "Support vector machines", "Neural network"))  +
+  ylim(0.5,1) +
+  labs(title = "Predictive performance of models trained with 2.5 % grid spacing data",
+       y = "Area under the ROC curve (AUC)",
+       color = "Metric") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic()
+```
+```{r 5 pc models plot, fig.height=4, fig.width=10, echo=FALSE}
+ggplot(model_performance_5pc_step, aes(x = Model)) + 
+  geom_boxplot(aes(y=AUC_testing, colour = "AUC testing")) + 
+  geom_boxplot(aes(y=AUC_validation, colour = "AUC validation")) +
+  scale_x_discrete(limits=c("Logistic regression", "Random forest", "Support vector machines", "Neural network"))  +
+  ylim(0.5,1) +
+  labs(title = "Predictive performance of models trained with 5 % grid spacing data",
+       y = "Area under the ROC curve (AUC)",
+       color = "Metric") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic()
+```
+
+### Statistical comparison
+```{r 2.5 and 5 pc models statistics, echo = FALSE}
+cat("Comparison of AUC testing values for models trained with 2.5 % grid spacing data \n ")
+run_statistical_analysys(model_performance_25pc_step, model_performance_25pc_step$AUC_testing, model_performance_25pc_step$Model)
+
+cat("Comparison of AUC validation values for models trained with 2.5 % grid spacing data \n")
+run_statistical_analysys(model_performance_25pc_step, model_performance_25pc_step$AUC_validation, model_performance_25pc_step$Model)
+
+cat("Comparison of AUC testing values for models trained with 5 % grid spacing data \n")
+run_statistical_analysys(model_performance_5pc_step, model_performance_5pc_step$AUC_testing, model_performance_5pc_step$Model)
+
+cat("Comparison of AUC validation values for models trained with 5 % grid spacing data \n")
+run_statistical_analysys(model_performance_5pc_step, model_performance_5pc_step$AUC_validation, model_performance_5pc_step$Model)
+```
+
+Overall, the random forest model was observed to have a statistically significantly better predictive performance on the validatation datasets (both for phase behaviour data with 2.5% or 5% spacing) than the Logistic regression, Support vector machines and Neural network models and, hence, was carried forward.
+
+## Comparison of random forest model predictive performance on phase behaviour data with 2.5% or 5% grid spacing
+```{r rf models dataframe, echo = FALSE}
+model_performance_random_forest <- model_performance_25pc_step[21:60,]
+model_performance_random_forest[21:40,] <- model_performance_5pc_step[21:40,]
+model_performance_random_forest$Data_spacing <- c(rep(2.5, 20), rep(5, 20))
+
+model_performance_random_forest$Model <- factor(model_performance_random_forest$Model)
+model_performance_random_forest$AUC_testing <- as.numeric(model_performance_random_forest$AUC_testing)
+model_performance_random_forest$AUC_validation <- as.numeric(model_performance_random_forest$AUC_validation)
+model_performance_random_forest$Data_spacing <- factor(model_performance_random_forest$Data_spacing)
+```
+
+### Visial comparison
+```{r rf models plot, fig.height=4, fig.width = 10, echo=FALSE}
+ggplot(model_performance_random_forest, aes(x = model_performance_random_forest$Data_spacing)) + 
+  geom_boxplot(aes(y=AUC_testing, colour = "AUC testing")) + 
+  geom_boxplot(aes(y=AUC_validation, colour = "AUC validation")) +
+  scale_x_discrete(limits=c("2.5", "5"))  +
+  ylim(0.8,1) +
+  labs(title = "Predictive performance of random forest models",
+       x = "Phase behaviour data grid spacing (%)",
+       y = "Area under the ROC curve (AUC)",
+       color = "Metric") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic()
+```
+
+### Statistical comparison
+```{r rf models statistics, echo = FALSE}
+cat("Comparison of AUC testing values for random forest models \n")
+run_statistical_analysys(model_performance_random_forest, model_performance_random_forest$AUC_testing, model_performance_random_forest$Data_spacing)
+
+cat("Comparison of AUC validation values for random forest models \n")
+run_statistical_analysys(model_performance_random_forest, model_performance_random_forest$AUC_validation, model_performance_random_forest$Data_spacing)
+```
+
+The predictive performance of the random forest model on the testing phase behaviour data obtained using a 2.5 % grid spacing is statistically significantly better than that on the testing phase behaviour data obtained using a 5 % grid spacing, and, hence this dataset was carried forward.
+
+# Export results 
+```{r export}
+write.csv(model_performance_25pc_step, "Results/Model performance (2.5 pc step).csv", row.names = FALSE)
+write.csv(model_performance_5pc_step, "Results/Model performance (5 pc step).csv", row.names = FALSE)
+
+```
