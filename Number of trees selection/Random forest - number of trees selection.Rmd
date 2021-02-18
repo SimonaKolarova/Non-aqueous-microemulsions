@@ -1,0 +1,143 @@
+---
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, echo = FALSE}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(pROC)
+#library(reshape)
+#library(RColorBrewer)
+library(corrplot)
+```
+
+### Scripts
+```{r r scripts}
+source("Predictive performance assessment.R", local = knitr::knit_global())
+source("Statistical analysis.R", local = knitr::knit_global())
+```
+
+### Dataset
+``` {r data}
+PB_predictors <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+```
+
+The  dataset was split into a training/testing(`TT_data`) and a validation (`V_data`) dataset comprising 21 and 7 phase diagrams, respectively.
+``` {r data splitting}
+TT_data <- filter(PB_predictors, Set == "Training")
+V_data <- filter(PB_predictors, Set == "Validation")
+```
+
+A list of all phase behaviour predictor names was created and the phase behaviour variable was encoded as a factor.
+``` {r definitions}
+predictors_all<-colnames(TT_data[,3:66][,-(4:6)])
+
+TT_data$Phase.behaviour<-factor(as.character(TT_data$Phase.behaviour))
+V_data$Phase.behaviour<-factor(as.character(V_data$Phase.behaviour))
+```
+
+### Random forest - number of trees selection
+
+#### Random forest algorithm 
+First, the function used to train and evaluated the random forest models was defined.
+```{r random forest algorithm}
+run_random_forest <- function(training_testing_data, validation_data, predictors, model_performance, model_name, model_number, trees) {
+  
+  # Training parameters
+  PMsummary <- function(...) c(twoClassSummary(...), defaultSummary(...))
+  trainCtrl <- trainControl(method = "cv", number = 10,
+                            summaryFunction = PMsummary, classProbs = TRUE)
+  
+  # Tuning
+  mtryValues <- c(round(length(predictors)/5),
+                  round(length(predictors)*2/5),
+                  round(length(predictors)*3/5),
+                  round(length(predictors)*4/5),
+                  length(predictors))
+
+  # Spliting TT_data
+  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE)
+  training_data <- training_testing_data[ trainIndex,]
+  testing_data <- training_testing_data[ -trainIndex,]
+  
+  
+  # Training model
+  rf_model <- train(training_data[,predictors],
+                       training_data$Phase.behaviour, 
+                       method = "rf",
+                       ntree = trees, 
+                       metric = "ROC",
+                       tuneGrid = data.frame(mtry = mtryValues),
+                       trControl = trainCtrl)
+  
+  
+  # Model performance assessement
+  model_performance <- model_performance_assessment(testing_data, validation_data, predictors, model_performance, rf_model, model_name, model_number)
+
+  return(model_performance)
+}  
+```
+
+#### Random forest models training and evaluation
+Eight random forest models comprising a varying number of trees were trained and evaluated.
+```{r results dataframe, echo = FALSE}
+# Model performance dataframe
+model_performance_trees <- data.frame(matrix(ncol = 17, nrow = 80))
+colnames(model_performance_trees) <- c("Model", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Recall_testing", "F1_testing", "AUC_validation", "Accuracy_validation", "Kappa_validation", "Sensitivity_validation", "Specificity_validation", "Precision_validation", "Recall_validation", "F1_validation")
+```
+
+```{r trees numbers}
+trees_list <- c(1, 5, 10, 50, 100, 500, 1000, 5000)
+```
+```{r rf models}
+for (i in 1:length(trees_list)) {
+  for (j in 1:10) {
+    model_number = (i-1)*10+j
+    model_name = paste("RF", trees_list[i])
+    model_performance_trees <- run_random_forest(TT_data, V_data, predictors_all, model_performance_trees, model_name, model_number, trees_list[i])
+  }
+}
+```
+
+#### Random forest models performance comparison
+To select the best model for the classification problem, the area under the receiver operating characteristic (ROC) curve (AUC) for the predictions on the testing ( 30% of `TT_data`, which was not used for training) and on the validation subsets for the eight models was compared.
+
+**Visual comparison** <br>
+```{r rf models plot, fig.height=4, fig.width=10, echo = FALSE}
+ggplot(model_performance_trees, aes(x = Model)) + 
+  geom_boxplot(aes(y=AUC_testing, colour = "Testing subset")) + 
+  geom_boxplot(aes(y=AUC_validation, colour = "Validation subset")) +
+  scale_x_discrete(limits=paste("RF", trees_list))  +
+  ylim(0.75,1) +
+  labs(title = "Random forest models trained using different numbers of trees",
+       y = "Area under the ROC curve (AUC)",
+       color = "Metric") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+**Statistical comparison** <br>
+Comparison of AUC testing values for the different models:
+```{r rf models testing statistics, echo = FALSE}
+run_statistical_analysys(model_performance_trees, model_performance_trees$AUC_testing, model_performance_trees$Model)
+```
+<br>
+Comparison of AUC validation values for the different models:
+```{r rf models validation statistics, echo = FALSE}
+run_statistical_analysys(model_performance_trees, model_performance_trees$AUC_validation, model_performance_trees$Model)
+```
+
+**Overall, random forest models employing 50 or more trees had a statistically significantly better predictive performance on both the testing and validatation datasets than those employing 10 or less trees.** <br>
+**There was no statistically significant differences between the predictive performance of the random forest models employing between 50 and 5000 trees.**<br>
+**Hence, to reduce the computational demand of the following feature selection steps, while not significantly altering the predictive performance of the models, the random forest structure comprising 50 trees was carried forward.**
+```{r export, echo = FALSE}
+write.csv(model_performance_trees, "Results/Model performance (tree number).csv", row.names = FALSE)
+```
