@@ -1,39 +1,23 @@
 ---
-title: "Solvent descriptors preprocessing"
-author: "Simona Kolarova"
 output:
   html_document:
     toc: true
-    toc_depth: 2
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE)
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning = FALSE, message = FALSE)
 ```
 
-# Aim
-Separetly preprocess the molecular descriptors for polar solvents (PS) and non-polar solvent (NPS) by:\
-- removing missing data, \
-- removing descriptors of zero and near-zero variance, \
-- transforming descriptors to reduce skewness, \
-- centering and scalling all descriptors, \
-- removing co-linear descriptors. 
-
-# Solvent descriptors
-
-The molecular properties of each PS or NPS were described by 2702 descriptors, which were obtained from Pubchem, from Dragon, from Padel or in-house.
-
-#Libraries
-```{r message=FALSE, warning=FALSE}
+```{r libraries, echo = FALSE}
 library(caret)
 library(e1071)
 library(corrplot)
 library(RColorBrewer)
 ```
 
-# Datasets
-Two sets of PS and NPS descriptors data were imported: one comprising descriptors for all solvents (used in predictive model training and validation) and one comprising descriptors for a reduced set of solvents (used in model training). The required preprocessing steps were determined using the latter training solvents set and applied on the former training/validation solvents set.
-``` {r, tidy = TRUE}
+### Datasets
+Two sets of PS and NPS descriptors data were imported: one comprising the descriptors for all solvents (used both in the training and validation phase diagrams) and one comprising the descriptors for a reduced set of solvents (used only in phase diagrams that are in the training subset). The required preprocessing steps were determined using the latter training solvents set and applied on the former training/validation solvents set.
+``` {r datasets}
 PS_descriptors <- read.csv("Data/PS descriptors.csv")
 NPS_descriptors <-read.csv("Data/NPS descriptors.csv")
 
@@ -41,8 +25,8 @@ PS_descriptors_training <- read.csv("Data/PS descriptors (training).csv")
 NPS_descriptors_training <-read.csv("Data/NPS descriptors (training).csv")
 ```
 
-# Removing descriptors containing missing data
-``` {r}
+### Removing descriptors containing missing data
+``` {r check NA, echo = FALSE, results='hide'}
 # Check whether the same number of columns containg missing data in training and training/validation dataset descriptors
 if (ncol(PS_descriptors[,colSums(is.na(PS_descriptors)) != 0]) == ncol(PS_descriptors_training[,colSums(is.na(PS_descriptors_training)) != 0])) {
   print("True")
@@ -56,139 +40,169 @@ if (ncol(NPS_descriptors[,colSums(is.na(NPS_descriptors)) != 0]) == ncol(NPS_des
 }
 
 # If both true, remove all variables containing a NA value
-PS_descriptors <-PS_descriptors[ , colSums(is.na(PS_descriptors)) == 0]
+```
+```{r PS remove NA}
+PS_descriptors <-PS_descriptors[,colSums(is.na(PS_descriptors)) == 0]
 PS_descriptors_training <- PS_descriptors_training[ , colSums(is.na(PS_descriptors_training)) == 0]
+```
+```{r, echo = FALSE}
 cat("Number of PS descriptors removed:", 2702-length(colnames(PS_descriptors)),"\n")
-
+```
+```{r NPS remove NA}
 NPS_descriptors <- NPS_descriptors[ , colSums(is.na(NPS_descriptors)) == 0]
 NPS_descriptors_training <- NPS_descriptors_training[ , colSums(is.na(NPS_descriptors_training)) == 0]
+```
+```{r, echo = FALSE}
 cat("Number of NPS descriptors removed:", 2702-length(colnames(PS_descriptors)),"\n")
 ```
 
-# Zero and near-zero variance descriptors removal
+### Zero and near-zero variance descriptors removal
 The number of descriptors was reduced by removing all descriptors that comprise less than 2 unique values (i.e., zero variance descriptors) or 2 unique values when 1 of them is only present once (i.e., nero-zero variance descriptors). 
-```{r}
+```{r PS zv and nzv}
 PS_descriptors_nzv<-nearZeroVar(PS_descriptors_training, freqCut = 7, uniqueCut = 23)
 PS_descriptors_training<-PS_descriptors_training[-c(PS_descriptors_nzv)]
 PS_descriptors<-PS_descriptors[-c(PS_descriptors_nzv)]
+```
+``` {r, echo = FALSE}
 cat("Number of PS descriptors removed:", length(PS_descriptors_nzv),"\n")
-
-
+```
+```{r NPS zv and nzv}
 NPS_descriptors_nzv<-nearZeroVar(NPS_descriptors_training, freqCut = 11, uniqueCut = 16)
 NPS_descriptors_training<-NPS_descriptors_training[-c(NPS_descriptors_nzv)]
 NPS_descriptors<-NPS_descriptors[-c(NPS_descriptors_nzv)]
+```
+``` {r, echo = FALSE}
 cat("Number of NPS descriptors removed:", length(NPS_descriptors_nzv),"\n")
-
 ```
 
-# Descriptors transformation, scaling and centering
-First the skewness of the descriptors was estimated as:
-```{r}
+### Descriptors transformation, scaling and centering
+First, the skewness of the descriptors was estimated as:
+```{r initial skeweness}
 skewness_PS<-apply(PS_descriptors_training[,2:641],2,skewness)
 skewness_NPS<-apply(NPS_descriptors_training[,2:684],2,skewness)
 ```
 The results were plotted as histograms to visually access the overall level of the skewness in the solvent descriptors datasets for polar solvents and non-polar solvents.
 
-## Polar solvent descriptors skewness
-```{r, echo = FALSE, fig.width = 12,fig.height = 4}
-ggplot(as.data.frame(skewness_PS), aes(skewness_PS))+geom_histogram(binwidth = 0.2)+labs(x="Lambda", y="Number of parameters")
+```{r initial PS skewness, echo = FALSE, fig.width = 12,fig.height = 4, fig.align="center"}
+ggplot(as.data.frame(skewness_PS), 
+       aes(skewness_PS)) + 
+  geom_histogram(binwidth = 0.2) +
+  labs(title = "Polar solvent descriptors skewness", x="Lambda", y="Number of parameters") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5))
 ```
 
-## Non-polar solvent descriptors skewness
-```{r, echo = FALSE,fig.width = 12,fig.height = 4}
-ggplot(as.data.frame(skewness_NPS), aes(skewness_NPS))+geom_histogram(binwidth = 0.2)+labs(x="Lambda", y="Number of parameters")
+```{r initial NPS skewness, echo = FALSE,fig.width = 12,fig.height = 4, fig.align="center"}
+ggplot(as.data.frame(skewness_NPS), 
+       aes(skewness_NPS)) + 
+  geom_histogram(binwidth = 0.2) + 
+  labs(title = "Non-polar solvent descriptors skewness",x="Lambda", y="Number of parameters") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5))
 ```
-The descriptors of NPS are notably more skewed than those of PS.
+The NPS descriptors are notably more skewed than the PS ones.
 
 To reduce the descriptors skewness the Yeo-Johnson transformation (which performs better than the alternative Box-Cox transformation at normalising variables containing zeros and negative numbers, such as the ones here) was applied to all predictors. \
 Additionally, all predictors were scaled and centered, which is important for predictive model development where the best model is determined by calculating the difference between classifiers and new samples and ranking it according to scale, such as support vector machines.
-```{r, echo = FALSE, warning = FALSE}
-# Determine preprocessing
+```{r preprocessing determination}
 PS_preprocessing <- preProcess(PS_descriptors_training[,2:641], method = c("scale", "center", "YeoJohnson"))
 NPS_preprocessing <- preProcess(NPS_descriptors_training[,2:684], method = c("scale", "center", "YeoJohnson"))
+```
 
-# Apply preprocessing to data
+``` {r PS preprocessing, echo = FALSE}
+cat("Polar solvent descriptors transormation \n")
+PS_preprocessing
+```
+
+``` {r NPS preprocessing, echo = FALSE}
+cat("Non-polar solvent descriptors transormation \n")
+NPS_preprocessing
+```
+
+```{r preprocessing application, echo = FALSE}
 PS_descriptors[,2:641] <- predict(PS_preprocessing, PS_descriptors[,2:641])
 PS_descriptors_training[,2:641] <- predict(PS_preprocessing, PS_descriptors_training[,2:641])
 NPS_descriptors[,2:684] <- predict(NPS_preprocessing, NPS_descriptors[,2:684])
 NPS_descriptors_training[,2:684] <- predict(NPS_preprocessing, NPS_descriptors_training[,2:684])
 ```
-## Polar solvent descriptors transormation
-``` {r, echo = FALSE, warning = FALSE}
-PS_preprocessing
-```
-
-## Non-polar solvent descriptors transormation
-``` {r, echo = FALSE, warning = FALSE}
-NPS_preprocessing
-```
-
 After the transformation, the overall skewness of the descriptors was significantly reduced.
 
-```{r, echo=FALSE}
+```{r final skewness, echo=FALSE}
 skewness_PS_2<-apply(PS_descriptors_training[,2:641],2,skewness)
 skewness_NPS_2<-apply(NPS_descriptors_training[,2:684],2,skewness)
 ```
-## Polar solvent descriptors skewness after transoformation
-```{r, echo = FALSE, fig.width = 12,fig.height = 4}
-ggplot(as.data.frame(skewness_PS_2), aes(skewness_PS_2))+geom_histogram(binwidth = 0.2)+labs(x="Lambda", y="Number of parameters")
-```
-## Non-polar solvent descriptors skewness after transoformation
-```{r, echo = FALSE, fig.width = 12,fig.height = 4}
-ggplot(as.data.frame(skewness_NPS_2), aes(skewness_NPS_2))+geom_histogram(binwidth = 0.2)+labs(x="Lambda", y="Number of parameters")
+
+```{r final PS skewness, echo = FALSE, fig.width = 12,fig.height = 4, fig.align="center"}
+ggplot(as.data.frame(skewness_PS_2), aes(skewness_PS_2)) + 
+  geom_histogram(binwidth = 0.2) + 
+  labs(title = "Polar solvent descriptors skewness after transoformation", x="Lambda", y="Number of parameters") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5))
 ```
 
-# Cross-correlation in solvent descriptors data
+```{r final NPS skewness, echo = FALSE, fig.width = 12,fig.height = 4, fig.align="center"}
+ggplot(as.data.frame(skewness_NPS_2), aes(skewness_NPS_2)) + 
+  geom_histogram(binwidth = 0.2) + 
+  labs(title = "Non-polar solvent descriptors skewness after transoformation", x="Lambda", y="Number of parameters") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Cross-correlations removal
 
 A number of predictive models, especially linear models (e.g., logistic regression and linear discriminant analysis), require that the predictors used are not co-linear to avoid errors in estimating the contribution (weight) of each predictor to the model.
 
 Hence,the cross-correlation between the predictors was calculated to assess the presence of co-linearity in the predictor data set.
 
-## Correlations between PS descriptors:
+<center> 
+**Correlation plot for PS descriptors**
+</center>
 
-```{r, tidy =TRUE, echo=FALSE, warning = FALSE}
-# PS Corrplot
+```{r PS corrplot, echo=FALSE, fig.width = 10,fig.height = 10, fig.align="center"}
 PS_corr <- cor(PS_descriptors_training[,2:641], method="pearson")
 cols <- c(rev(brewer.pal(9, "Blues")),brewer.pal(9, "Reds"))
-corrplot::corrplot(PS_corr,order="hclust", tl.cex = 0.2,
-         addgrid.col = rgb(1,1,1,.01),col = colorRampPalette(cols)(51))
+corrplot::corrplot(PS_corr,
+                   order = "hclust",
+                   tl.cex = 0.2,
+                   addgrid.col = rgb(1,1,1,.01),
+                   col = colorRampPalette(cols)(51))
 ```
-
-## Correlations between NPS descriptors:
-
-```{r, tidy =TRUE, echo=FALSE}
-# NPS Corrplot
+<center>
+**Correlation plot for NPS descriptors**
+</center>
+```{r NPS corrplot, echo=FALSE, fig.width = 10,fig.height = 10, fig.align="center"}
 NPS_corr <- cor(NPS_descriptors_training[,2:684], method="pearson")
 cols <- c(rev(brewer.pal(9, "Blues")),brewer.pal(9, "Reds"))
-corrplot::corrplot(NPS_corr,order="hclust", tl.cex = 0.2,
-         addgrid.col = rgb(1,1,1,.01),col = colorRampPalette(cols)(51))
+corrplot::corrplot(NPS_corr,
+                   tl.cex = 0.2,
+                   order = "hclust",
+                   addgrid.col = rgb(1,1,1,.01),
+                   col = colorRampPalette(cols)(51))
 ```
 
 As can be seen from the two correlation plots above, there is significant co-linearity in both descriptor datasets.
 
-\newpage
-# Cross-correlations reduction
+To reduce this co-linearity a Pearson two-tailed correlation test was used. A Pearson correlation of 0.735 (p = 0.01, 9 polar solvents) and of 0.641 (p = 0.01, 13 non-polar solvents) was considered significant.
 
-To reduce this co-linearity a Pearson two-tailed correlation test was used for the polar and non-polar solvents molecular descriptors separately. A Pearson correlation of 0.735 (p=0.01, 9 polar solvents) and of 0.641 (p=0.01, 13 non-polar solvents) was considered "significant".
+**Polar solvent descriptors**
 
-##  Polar solvent descriptors
+First, the cross-correlations between Dragon and PaDEL PS descriptors was reduced:
 
-First, the cross-correlations between Dragon and Padel polar solvent (PS) descriptors was reduced:
-
-``` {r, tidy = TRUE}
+``` {r PS correlations removal 1}
 PS_corr_DP <-cor(PS_descriptors_training[,8:641], method="pearson")
 PS_corr_names_DP <- findCorrelation(PS_corr_DP, cutoff = 0.735, names = TRUE, exact = TRUE)
 
 PS_colnames_DP <- colnames(PS_descriptors_training[8:641])[!(colnames(PS_descriptors_training[8:641]) %in% PS_corr_names_DP)]
-
+```
+```{r, echo = FALSE}
 cat("Number of descriptors removed:", length(PS_corr_names_DP))
 ```
 
-Next, the cross-correlations between the reduced number of Dragon and Padel descriptors and the remaining PubChem and in-house calculated descriptors were manually removed. 
+Next, the cross-correlations between the reduced number of Dragon and PaDEL descriptors and the remaining PubChem and in-house calculated descriptors were manually removed. 
 For this purpose, the cross-correlations between the descriptors were calculated (Pearson two-tailed correlation) and correlation values larger than 0.735 were treated as significant (assigned a "1"), while lower correlations values were treated as insignificant (assigned a "0") .The molecular descriptors self-correlations along the matrix diagonals were also assigned a value of 0 and a binary correlation matrix was obtained.
 All descriptors, which were significanly correlated to the in-house and PubChem descriptors were removed.
 
-```{r, tidy = TRUE}
+```{r PS correlations removal 2}
 # Binary correlation matrix
 PS_colnames_basic_DP <- c(colnames(PS_descriptors_training[2:7]), PS_colnames_DP)
 
@@ -200,28 +214,29 @@ diag(PS_corr_basic_DP) <- 0
 # Removal of significantly correlated descriptors
 PS_corr_basic_DP <- PS_corr_basic_DP[PS_corr_basic_DP["AmphM_PS"]== 0, PS_corr_basic_DP["AmphM_PS"] == 0]
 PS_corr_basic_DP <- PS_corr_basic_DP[PS_corr_basic_DP["Hydrogen.Bond.Acceptor.Count_PS"]== 0, PS_corr_basic_DP["Hydrogen.Bond.Acceptor.Count_PS"] == 0]
-
+```
+```{r, echo = FALSE}
 cat("Number of descriptors removed:", length(PS_colnames_basic_DP)-length(colnames(PS_corr_basic_DP)),"\n")
-
 cat("Significant correlations left:", sum(PS_corr_basic_DP))
 ```
 
 
-##  Non-polar solvent descriptors
+**Non-polar solvent descriptors**
 
-An equivalent methodology was employed to remove the significant cross-correlations (Pearson correlation coefficient > 0.641) withing the non-polar solvent (NPS) molecular descriptors dataset. 
+An equivalent methodology was employed to remove the significant cross-correlations (Pearson correlation coefficient >= 0.641) withing the NPS molecular descriptors dataset. 
 
-``` {r, tidy = TRUE}
+``` {r NPS correlations removal 1}
 NPS_corr_DP <-cor(NPS_descriptors_training[,8:684], method="pearson")
 NPS_corr_names_DP <- findCorrelation(NPS_corr_DP, cutoff = 0.641, names = TRUE, exact = TRUE)
 
 NPS_colnames_DP <- colnames(NPS_descriptors_training[8:684])[!(colnames(NPS_descriptors_training[8:684]) %in% NPS_corr_names_DP)]
-
+```
+```{r, echo = FALSE}
 cat("Number of descriptors removed:", length(NPS_corr_names_DP))
 ```
 
 
-```{r, tidy = TRUE}
+```{r NPS correlations removal 2}
 # Binary correlation matrix
 NPS_colnames_basic_DP <- c(colnames(NPS_descriptors_training[2:7]), NPS_colnames_DP)
 
@@ -232,40 +247,36 @@ diag(NPS_corr_basic_DP) <- 0
 
 # Removal of significantly correlated descriptors
 NPS_corr_basic_DP <- NPS_corr_basic_DP[NPS_corr_basic_DP["Molecular.volume..A3._NPS"]== 0, NPS_corr_basic_DP["Molecular.volume..A3._NPS"] == 0]
-
+```
+```{r, echo = FALSE}
 cat("Number of descriptors removed:", length(NPS_colnames_basic_DP)-length(colnames(NPS_corr_basic_DP)),"\n")
-
 cat("Significant correlations left:", sum(NPS_corr_basic_DP))
 ```
 
-# Preprocessed descriptors
-34 polar solvent descriptors and 24 non-polar solvent descriptors remained after the above preprocessing steps.
+### Results
+A total of **34 polar solvent descriptors** and **24 non-polar solvent descriptors** remained after the above preprocessing steps.
 
-## Polar solvent descriptors
 ```{r, echo = FALSE}
+cat("Polar solvent descriptors")
 colnames(PS_corr_basic_DP)
 ```
 
-## Non-polar solvent descriptors
 ```{r, echo = FALSE}
+cat("Non-polar solvent descriptors")
 colnames(NPS_corr_basic_DP)
 ```
 
-# Datasets  
 The results were used to reduce the number of predictors in the descriptor datasets.
 ```{r}
 PS_colnames<-c("PS", colnames(PS_corr_basic_DP))
 PS_descriptors<-PS_descriptors[c(PS_colnames)]
-PS_descriptors_training<-PS_descriptors_training[c(PS_colnames)]
 
 NPS_colnames<-c("NPS", colnames(NPS_corr_basic_DP))
 NPS_descriptors<-NPS_descriptors[c(NPS_colnames)]
-NPS_descriptors_training<-NPS_descriptors_training[c(NPS_colnames)]
-
 ```
 
+```{r, echo = FALSE}
 # Export preprocessed datasets 
-```{r}
 write.csv(PS_descriptors, "Results/PS descriptors.csv", row.names = FALSE)
 write.csv(NPS_descriptors, "Results/NPS descriptors.csv", row.names = FALSE)
 ```
