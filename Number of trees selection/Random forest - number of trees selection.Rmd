@@ -13,8 +13,6 @@ library(tidyverse)
 library(caret)
 library(randomForest)
 library(pROC)
-#library(reshape)
-#library(RColorBrewer)
 library(corrplot)
 ```
 
