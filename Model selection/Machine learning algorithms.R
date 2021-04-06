@@ -1,8 +1,8 @@
 # Generalized linear model
-run_logistic_regression <- function(training_testing_data, validation_data, predictors, model_performance, model_name, model_number) {
+run_logistic_regression <- function(training_testing_data, predictors, model_performance, model_name, model_number) {
 
   # Split TT_data
-  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE, times = 1)
+  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE)
   training_data <- training_testing_data[ trainIndex,]
   testing_data <- training_testing_data[ -trainIndex,]
   
@@ -14,7 +14,7 @@ run_logistic_regression <- function(training_testing_data, validation_data, pred
                        trControl = trainCtrl)
 
   # Model performance assessement
-  model_performance <- model_performance_assessment(testing_data, validation_data, predictors, model_performance, lr_all_pred, model_name, model_number)
+  model_performance <- model_performance_assessment(testing_data, predictors, model_performance, lr_all_pred, model_name, model_number)
   
   return(model_performance)
 }  
@@ -22,7 +22,7 @@ run_logistic_regression <- function(training_testing_data, validation_data, pred
 
 
 # Random forest model
-run_random_forest <- function(training_testing_data, validation_data, predictors, model_performance, model_name, model_number) {
+run_random_forest <- function(training_testing_data, predictors, model_performance, model_name, model_number) {
   
   # Tuning
   mtryValues <- c(round(length(predictors)*1/5),
@@ -32,7 +32,7 @@ run_random_forest <- function(training_testing_data, validation_data, predictors
                   length(predictors))
   
   # Split TT_data
-  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE, times = 1)
+  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE)
   training_data <- training_testing_data[ trainIndex,]
   testing_data <- training_testing_data[ -trainIndex,]
   
@@ -46,7 +46,7 @@ run_random_forest <- function(training_testing_data, validation_data, predictors
                        trControl = trainCtrl)
   
   # Model performance assessement
-  model_performance <- model_performance_assessment(testing_data, validation_data, predictors, model_performance, rf_all_pred,  model_name, model_number)
+  model_performance <- model_performance_assessment(testing_data, predictors, model_performance, rf_all_pred,  model_name, model_number)
   
   return(model_performance)
 }  
@@ -54,10 +54,10 @@ run_random_forest <- function(training_testing_data, validation_data, predictors
 
 
 # Support vector machines model
-run_support_vector_machines <- function(training_testing_data, validation_data, predictors, model_performance, model_name, model_number) {
+run_support_vector_machines <- function(training_testing_data, predictors, model_performance, model_name, model_number) {
   
   # Split TT_data
-  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE, times = 1)
+  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE)
   training_data <- training_testing_data[ trainIndex,]
   testing_data <- training_testing_data[ -trainIndex,]
   
@@ -70,17 +70,17 @@ run_support_vector_machines <- function(training_testing_data, validation_data, 
                        trControl = trainCtrl)
   
   # Model performance assessement
-  model_performance <- model_performance_assessment(testing_data, validation_data, predictors, model_performance, svm_all_pred,  model_name, model_number)
+  model_performance <- model_performance_assessment(testing_data, predictors, model_performance, svm_all_pred,  model_name, model_number)
   
   return(model_performance)
 }  
 
 # Neural network model
 
-run_neural_network <- function(training_testing_data, validation_data, predictors, model_performance, model_name, model_number) {
+run_neural_network <- function(training_testing_data, predictors, model_performance, model_name, model_number) {
   
   # Split TT_data
-  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE, times = 1)
+  trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE)
   training_data <- training_testing_data[ trainIndex,]
   testing_data <- training_testing_data[ -trainIndex,]
   
@@ -99,7 +99,7 @@ run_neural_network <- function(training_testing_data, validation_data, predictor
                         trControl = trainCtrl)
   
   # Model performance assessement
-  model_performance <- model_performance_assessment(testing_data, validation_data, predictors, model_performance, nn_all_pred,  model_name, model_number)
+  model_performance <- model_performance_assessment(testing_data, predictors, model_performance, nn_all_pred,  model_name, model_number)
   
   return(model_performance)
 }  

@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, mes
 
 ```{r libraries, echo = FALSE}
 library(tidyverse)
+library(reshape)
 library(caret)
 library(randomForest)
 library(kernlab)
@@ -30,22 +31,19 @@ registerDoParallel(makeCluster(detectCores()-1))
 ```
 
 ### Dataset
-``` {r data}
+```{r data}
 PB_predictors_data<- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
 ```
 
-The dataset was split into a training/testing (`TT_data`) and validation (`V_data`) subset comprising 21 and 7 phase diagrams, respectively.
-``` {r data splitting}
+The dataset was split into a training/testing (`TT_data`) and validation subset comprising 21 and 7 phase diagrams, respectively. Only the training/testing dataset was used for model selection.
+```{r data splitting}
 TT_data <- filter(PB_predictors_data, Set == "Training")
-V_data <- filter(PB_predictors_data, Set == "Validation")
 ```
 
 A list of all phase behaviour predictor names was created and the phase behaviour variable was encoded as a factor.
-``` {r data definitions}
+```{r data definitions}
 predictors_all<-colnames(TT_data[,3:66][,-(4:6)])
-
 TT_data$Phase.behaviour<-factor(as.character(TT_data$Phase.behaviour))
-V_data$Phase.behaviour<-factor(as.character(V_data$Phase.behaviour))
 ```
 
 ### Predictive modelling 
@@ -62,8 +60,8 @@ trainCtrl <- trainControl(method = "cv",
 ```
 
 ```{r results dataframe, echo = FALSE}
-model_performance <- data.frame(matrix(ncol = 17, nrow = 80))
-colnames(model_performance) <- c("Model", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Recall_testing", "F1_testing", "AUC_validation", "Accuracy_validation", "Kappa_validation", "Sensitivity_validation", "Specificity_validation", "Precision_validation", "Recall_validation", "F1_validation")
+model_performance <- data.frame(matrix(ncol = 8, nrow = 80))
+colnames(model_performance) <- c("Model", "AUC", "Accuracy", "Kappa", "Sensitivity", "Specificity", "Precision", "Fscore")
 ```
 
 **Logistic regression (LR)** <br>
@@ -72,11 +70,11 @@ mathematical relationships between each predictor and the categorical outcome by
 minimising the sums of the squared residuals and linearly aggregates the resulting individual
 relationships to obtain a probabilistic categorical outcome. This ML algorithm requires no
 parameter tuning, thereby reducing the likelihood of data overfitting. For the purpose of
-this study, the *glm* method in the R package *caret* was used to train a LR model.
+this study, the `glm` method in the R package *caret* was used to train a LR model.
 
 ```{r LR}
 for (i in 1:20) {
-  model_performance <- run_logistic_regression(TT_data, V_data, predictors_all, model_performance,"Logistic regression", i)
+  model_performance <- run_logistic_regression(TT_data, predictors_all, model_performance, "LR", i)
 }
 ```
 **Random forest (RF)** <br>
@@ -95,7 +93,7 @@ datapoint per terminal node.
 
 ```{r RF}
 for (i in 21:40) {
-  model_performance <- run_random_forest(TT_data, V_data, predictors_all, model_performance, "Random forest", i)
+  model_performance <- run_random_forest(TT_data, predictors_all, model_performance, "RF", i)
 }
 ```
 
@@ -109,7 +107,7 @@ we used the R package `kernlab`, specified the kernel function as radial and tun
 of the cost parameter.
 ```{r SVM}
 for (i in 41:60) {
-  model_performance <- run_support_vector_machines(TT_data, V_data, predictors_all, model_performance, "Support vector machines", i)
+  model_performance <- run_support_vector_machines(TT_data, predictors_all, model_performance, "SVM", i)
 }
 ```
 
@@ -126,46 +124,58 @@ were determined through parameter tuning.
 
 ```{r NN}
 for (i in 61:80) {
-  model_performance <- run_neural_network(TT_data, V_data, predictors_all, model_performance, "Neural network", i)
+  model_performance <- run_neural_network(TT_data, predictors_all, model_performance, "NN", i)
 }
 ```
 
-#### Model performance comparison 
-To select the best model for the classification problem, the area under the receiver operating characteristic (ROC) curve (AUC) for the predictions on the testing (randomly selected 30% of `TT_data`, which was not used for training) and on the validation subsets for the four different models was compared.
-```{r performance metrics, echo = FALSE}
-model_performance$Model <- factor(model_performance$Model)
-model_performance$AUC_testing <- as.numeric(model_performance$AUC_testing)
-model_performance$AUC_validation <- as.numeric(model_performance$AUC_validation)
+#### Model performance comparison
+The prediction perfromance of the four models on the testing data (randomly selected 30% of `TT_data`, which was not used for training) was visually assessed using the various perfromance metrics.
+
+```{r melt, echo = FALSE}
+model_performance_melt <- melt(model_performance[-c(2)], value.name = "Model")
 ```
 
-**Visual comparison**
-```{r models plot, fig.height=4, fig.width=10, echo=FALSE}
-ggplot(model_performance, aes(x = Model)) + 
-  geom_boxplot(aes(y=AUC_testing, colour = "Testing subset")) + 
-  geom_boxplot(aes(y=AUC_validation, colour = "Validation subset")) +
-  scale_x_discrete(limits=c("Logistic regression", "Random forest", "Support vector machines", "Neural network"))  +
-  ylim(0.5,1) +
-  labs(title = "Predictive performance of different models",
-       y = "Area under the ROC curve (AUC)",
-       color = "Metric") +
+```{r models plot 1, fig.height=4, fig.width=10, echo=FALSE}
+ggplot(model_performance_melt, aes(x = Model, y = value,  color = Model)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  scale_x_discrete(limits=c("LR", "RF", "SVM", "NN"))  +
+  ylim(0.6,1) +
+  labs(title = "Predictive performance of different models on testing data",
+       y = "Performance") +
   scale_color_brewer(palette = "Set1") +
+  theme_classic() + 
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+```
+
+The results suggest that the logistic regression (LR) model generalizes unseen phase behaviour data significantly worse than the other three models, *i.e.*, random forest (RF), support vector machines (SVM) and neural networks (NN), which, in turn, perform comparatively well.  
+
+### Model selection using AUC metric
+To select the best model for the phase behaviour classification problem, the area under the receiver operating characteristic (ROC) curve (AUC) for the predictions on the testing data for the three better-performing models identified above, *i.e.*, RF, SVM and NN, was compared.
+
+**Visual comparison** <br>
+```{r AUC plot, fig.height=4, fig.width=10, echo=FALSE}
+model_performance$Model <- factor(model_performance$Model)
+model_performance$AUC <- as.numeric(model_performance$AUC)
+
+ggplot(model_performance, aes(x = Model, y=AUC)) + 
+  geom_boxplot() + 
+  scale_x_discrete(limits=c("RF", "SVM", "NN"))  +
+  ylim(0.94,1) +
+  labs(title = "Area under the ROC curve (AUC)", y = "Performance") +
   theme_classic() +
   theme(plot.title = element_text(hjust = 0.5)) 
 ```
 
-
-**Statistical comparison** <br>
+**Statistical comparison ** <br>
 Comparison of AUC testing values for the different models:
+
 ```{r models testing statistics, echo = FALSE}
-run_statistical_analysys(model_performance, model_performance$AUC_testing, model_performance$Model)
+run_statistical_analysys(model_performance, model_performance[21:80,]$AUC, model_performance[21:80,]$Model)
 ```
 <br>
-Comparison of AUC validation values for the different models:
-```{r models validation statistics, echo = FALSE}
-run_statistical_analysys(model_performance, model_performance$AUC_validation, model_performance$Model)
-```
 
-**Overall, the random forest model was observed to have a statistically significantly better predictive performance on both the testing and validatation datasets than the Logistic regression, Support vector machines or Neural network models and, hence, was carried forward.**
+**The results suggest that the random forest and neural network models have a statistically significantly better aggregate predictive performance on the testing datasets than the support vector machines models. While the NN models had a slightly higher average AUC (0.972 ± 0.04) than the RF models (0.971 ± 0.04), the difference between the two sets of models was not statistically significant (p = 0.45). Hence, the less computationally demanting model, *i.e.* random forest, was carried forward.**
 
 
 ```{r export, echo = FALSE}
