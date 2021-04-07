@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, mes
 
 ```{r libraries, echo = FALSE}
 library(tidyverse)
+library(reshape)
+library(ggpubr)
 library(caret)
 library(randomForest)
 library(pROC)
@@ -27,18 +29,15 @@ source("Statistical analysis.R", local = knitr::knit_global())
 PB_predictors <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
 ```
 
-The  dataset was split into a training/testing(`TT_data`) and a validation (`V_data`) dataset comprising 21 and 7 phase diagrams, respectively.
+The  dataset was split into a training/testing (`TT_data`) and a validation dataset comprising 21 and 7 phase diagrams, respectively. Only the training/testing dataset was used in the selection of the random forest structure (*i.e.*, number of trees).
 ``` {r data splitting}
 TT_data <- filter(PB_predictors, Set == "Training")
-V_data <- filter(PB_predictors, Set == "Validation")
 ```
 
 A list of all phase behaviour predictor names was created and the phase behaviour variable was encoded as a factor.
-``` {r definitions}
+``` {r data definitions}
 predictors_all<-colnames(TT_data[,3:66][,-(4:6)])
-
 TT_data$Phase.behaviour<-factor(as.character(TT_data$Phase.behaviour))
-V_data$Phase.behaviour<-factor(as.character(V_data$Phase.behaviour))
 ```
 
 ### Random forest - number of trees selection
@@ -46,7 +45,7 @@ V_data$Phase.behaviour<-factor(as.character(V_data$Phase.behaviour))
 #### Random forest algorithm 
 First, the function used to train and evaluated the random forest models was defined.
 ```{r random forest algorithm}
-run_random_forest <- function(training_testing_data, validation_data, predictors, model_performance, model_name, model_number, trees) {
+run_random_forest <- function(training_testing_data, predictors, model_performance, model_name, model_number, trees) {
   
   # Training parameters
   PMsummary <- function(...) c(twoClassSummary(...), defaultSummary(...))
@@ -60,13 +59,12 @@ run_random_forest <- function(training_testing_data, validation_data, predictors
                   round(length(predictors)*4/5),
                   length(predictors))
 
-  # Spliting TT_data
+  # TT_data spliting 
   trainIndex <- createDataPartition(training_testing_data$Phase.behaviour, p = .7, list = FALSE)
   training_data <- training_testing_data[ trainIndex,]
   testing_data <- training_testing_data[ -trainIndex,]
   
-  
-  # Training model
+  # Model training
   rf_model <- train(training_data[,predictors],
                        training_data$Phase.behaviour, 
                        method = "rf",
@@ -77,18 +75,18 @@ run_random_forest <- function(training_testing_data, validation_data, predictors
   
   
   # Model performance assessement
-  model_performance <- model_performance_assessment(testing_data, validation_data, predictors, model_performance, rf_model, model_name, model_number)
+  model_performance <- model_performance_assessment(testing_data, predictors, model_performance, rf_model, model_name, model_number)
 
   return(model_performance)
 }  
 ```
 
 #### Random forest models training and evaluation
-Eight random forest models comprising a varying number of trees were trained and evaluated.
+Eight types random forest models (n=10) comprising a varying number of trees were trained and evaluated.
 ```{r results dataframe, echo = FALSE}
 # Model performance dataframe
-model_performance_trees <- data.frame(matrix(ncol = 17, nrow = 80))
-colnames(model_performance_trees) <- c("Model", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Recall_testing", "F1_testing", "AUC_validation", "Accuracy_validation", "Kappa_validation", "Sensitivity_validation", "Specificity_validation", "Precision_validation", "Recall_validation", "F1_validation")
+model_performance_trees <- data.frame(matrix(ncol = 8, nrow = 80))
+colnames(model_performance_trees) <- c("Model", "AUC", "Accuracy", "Kappa", "Sensitivity", "Specificity", "Precision", "Fscore")
 ```
 
 ```{r trees numbers}
@@ -99,43 +97,85 @@ for (i in 1:length(trees_list)) {
   for (j in 1:10) {
     model_number = (i-1)*10+j
     model_name = paste("RF", trees_list[i])
-    model_performance_trees <- run_random_forest(TT_data, V_data, predictors_all, model_performance_trees, model_name, model_number, trees_list[i])
+    model_performance_trees <- run_random_forest(TT_data, predictors_all, model_performance_trees, model_name, model_number, trees_list[i])
   }
 }
 ```
 
 #### Random forest models performance comparison
-To select the best model for the classification problem, the area under the receiver operating characteristic (ROC) curve (AUC) for the predictions on the testing ( 30% of `TT_data`, which was not used for training) and on the validation subsets for the eight models was compared.
+The prediction perfromance of the four models on the testing data (randomly selected 30% of `TT_data`, which was not used for training) was visually assessed using the various perfromance metrics.
+
+```{r melt, echo = FALSE}
+model_performance_melt_1 <- melt(model_performance_trees[-c(2,5,6,7,8)], value.name = "Model")
+model_performance_melt_2 <- melt(model_performance_trees[-c(2,3,4,7,8)], value.name = "Model")
+model_performance_melt_3 <- melt(model_performance_trees[-c(2,3,4,5,6)], value.name = "Model")
+```
+
+```{r models plot 1, fig.height=12, fig.width=10, echo=FALSE}
+mp1 <- ggplot(model_performance_melt_1, aes(x = Model, y = value,  color = Model)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  scale_x_discrete(limits= paste("RF", trees_list)) +
+  ylim(0.85,1) +
+  labs(title = "Predictive performance of random forest models on testing data",
+       y = "Performance") +
+  scale_color_brewer(palette = "Set2") +
+  theme_classic() + 
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+mp2 <- ggplot(model_performance_melt_2, aes(x = Model, y = value,  color = Model)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  scale_x_discrete(limits= paste("RF", trees_list)) +
+  ylim(0.92,1) +
+  labs(y = "Performance") +
+  scale_color_brewer(palette = "Set2") +
+  theme_classic() + 
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+mp3 <- ggplot(model_performance_melt_3, aes(x = Model, y = value,  color = Model)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  scale_x_discrete(limits= paste("RF", trees_list)) +
+  ylim(0.92,1) +
+  labs(y = "Performance") +
+  scale_color_brewer(palette = "Set2") +
+  theme_classic() + 
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+ggarrange(mp1, mp2, mp3, 
+          ncol = 1, nrow = 3)
+```
+
+The results suggest that the number of trees comprising the random forests affects the models' predictive performance. Specifically, models incorporating few trees (*i.e.*, less than 50) generally exhibit a comparatively lower prediction performance on the training data and so does the model employing the most trees (*i.e.*, 5000), likely due to data overfitting. Random forests comprising between 50 and 1000 trees appear to perform equally well.  
+
+### Number of trees selection using AUC metric
+To select the best random forest model structure for the phase behaviour classification problem, the area under the receiver operating characteristic (ROC) curve (AUC) for the predictions of the eigth investigated model structures on the testing data (*i.e.*, 30% of `TT_data`, which was not used for training) was compared.
 
 **Visual comparison** <br>
 ```{r rf models plot, fig.height=4, fig.width=10, echo = FALSE}
-ggplot(model_performance_trees, aes(x = Model)) + 
-  geom_boxplot(aes(y=AUC_testing, colour = "Testing subset")) + 
-  geom_boxplot(aes(y=AUC_validation, colour = "Validation subset")) +
+ggplot(model_performance_trees, aes(x = Model, y=AUC)) + 
+  geom_boxplot() + 
   scale_x_discrete(limits=paste("RF", trees_list))  +
-  ylim(0.75,1) +
+  ylim(0.92,1) +
   labs(title = "Random forest models trained using different numbers of trees",
-       y = "Area under the ROC curve (AUC)",
-       color = "Metric") +
-  scale_color_brewer(palette = "Set1") +
+       y = "Area under the ROC curve (AUC)") +
   theme_classic() +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
 **Statistical comparison** <br>
-Comparison of AUC testing values for the different models:
 ```{r rf models testing statistics, echo = FALSE}
-run_statistical_analysys(model_performance_trees, model_performance_trees$AUC_testing, model_performance_trees$Model)
-```
-<br>
-Comparison of AUC validation values for the different models:
-```{r rf models validation statistics, echo = FALSE}
-run_statistical_analysys(model_performance_trees, model_performance_trees$AUC_validation, model_performance_trees$Model)
+run_statistical_analysys(model_performance_trees, model_performance_trees$AUC, model_performance_trees$Model)
 ```
 
-**Overall, random forest models employing 50 or more trees had a statistically significantly better predictive performance on both the testing and validatation datasets than those employing 10 or less trees.** <br>
-**There was no statistically significant differences between the predictive performance of the random forest models employing between 50 and 5000 trees.**<br>
-**Hence, to reduce the computational demand of the following feature selection steps, while not significantly altering the predictive performance of the models, the random forest structure comprising 50 trees was carried forward.**
+**The four model structures employing 50, 100, 500 or 1000 decision trees all performed equally well. The average AUC for these model types (n = 10) was between 0.9688 ± 0.004 and 0.9699 ± 0.003 and the differences between them were not statistically significant with the corresponding p-values ranging between 0.998 and 1.**
+<br><br>
+**Conversely, the two models comprising the smallest number of trees (*i.e.*, 1 and 5) both performed statistically significantly worse than all models comprising 50 to 1000 trees (p-values between 0 and 0.006).**
+<br><br>
+**Lastly, the models comprising 10 and 5000 decision trees had an average AUC of 0.9675 ± 0.003 and 0.9679 ± 0.003, respectively, suggesting their prediction performance on the training data is sligtly worse than the four models employing 50 to 1000 trees, however, not statistically significantly so (p-values between 0.856 and 0.999).**
+<br><br>
+**To reduce the computational demand of the following feature selection steps, while not decreasing the predictive performance of the algorithm, the random forest structure comprising 50 decision trees was selected to carry forward.**
 ```{r export, echo = FALSE}
 write.csv(model_performance_trees, "Results/Model performance (tree number).csv", row.names = FALSE)
 ```
