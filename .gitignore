@@ -5,7 +5,8 @@
 *.RData
 *.rdb
 *.rdx
-Results/
 *.png
 *.html
 *__packages
+Results/
+Phase behaviour (5pc step)/
