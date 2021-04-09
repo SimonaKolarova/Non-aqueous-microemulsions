@@ -1,0 +1,134 @@
+---
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, echo = FALSE}
+library(tidyverse)
+library(caret)
+library(e1071)
+library(randomForest)
+library(pROC)
+library(desirability)
+```
+
+### Scripts
+```{r r scripts}
+source("Random forest algorithm.R",local = knitr::knit_global())
+source("Predictive performance assessment.R", local = knitr::knit_global())
+```
+
+### Dataset
+```{r data}
+PB_predictors_data <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+```
+
+The dataset was split into a training/testing (`TT_data`) and validation subset comprising 21 and 7 phase diagrams, respectively. Only the training/testing dataset was used for feature selection and random forest training.
+```{r data splitting}
+TT_data <- filter(PB_predictors_data, Set == "Training")
+```
+
+A list of all phase behaviour predictor names was created and the phase behaviour variable was encoded as a factor.
+```{r data definitions}
+predictors_all <- colnames(TT_data[,3:66][,-(4:6)])
+TT_data$Phase.behaviour <- factor(as.character(TT_data$Phase.behaviour))
+```
+
+### Feature selection using a genetic algorithm
+#### Method 
+To determe the optimum subset of compositional and molecular descriptors, the *caret* genetic feature selection algorithm *ga* was employed. The algorithm was trained over 250 iterations of 50 chromosomes each and the cross-over and mutation rates were set at 0.8 and 0.1, respectively. The fitness of each model was assessed using a custom function, which accounts both for the model's prediction AUC (the higher the AUC - the higher the model fitness) and the number of predictors employed in the random forest structure (the lower the number of predictors - the higher the model fitness) with the former contributing twice as much as the latter to the fitness estimate.
+
+```{r genetic algorithm function}
+# Genetic algorithm with desirability internal fitness estimate 
+run_genetic_algorithm <- function(training_testing_data, predictors) {
+
+  # Customise fitness estimate functions
+  rfGA_desirability <- rfGA
+  
+  rfGA_desirability$fitness_intern <- function (object, x, y, maximize, p) {
+    ROC <- auc(roc(predict(object, x), as.numeric(y)))
+    dROC <- dMax(0.8, 1) # Maximize ROC 
+    dPredictors <- dMin(11, p, 2) # Minimize number of predictors (scaling factor 2)
+    overall <- dOverall(dROC, dPredictors)
+    D <- predict(overall, data.frame(ROC, ncol(x)))
+    c(D = D, ROC = as.vector(ROC))
+  }
+  
+  rfGA_desirability$fitness_extern <- twoClassSummary # Obtain classification performance metrics
+  
+  # Genetic algorithm control function
+  gaCtrl_desirability <- gafsControl(functions = rfGA_desirability,
+                                     method = "cv",
+                                     number = 10, 
+                                     metric = c(internal = "D", external = "ROC"),
+                                     maximize = c(internal = TRUE, external = TRUE),
+                                     returnResamp = "final",
+                                     allowParallel = TRUE, 
+                                     genParallel = TRUE)
+  
+  
+  rf_ga_desirability <- gafs(training_testing_data[,predictors],
+                             training_testing_data$Phase.behaviour, 
+                             # Genetic algorithm controls
+                             iters = 250,
+                             popSize = 50,
+                             pcrossover = 0.8,
+                             pmutation = 0.1, 
+                             elite = 0, 
+                             gafsControl = gaCtrl_desirability,
+                             # Random forest controls
+                             ntree=50)
+  
+  return(rf_ga_desirability)
+}  
+```
+```{r genetic algorithm run}
+rf_ga_desirability <- run_genetic_algorithm(TT_data, predictors_all)
+saveRDS(rf_ga_desirability, file = "Results/GA feature selection results (250, 50, 0.8, 0.1, 0).RDS") 
+```
+#### Results
+The changes in random forest fitness with training generation are shown below. The internal and external estimates refer to the fitness values obtained on the 9/10 and 1/10 of the training data, respectively, via the 10-fold cross-validation.
+```{r genetic algorithm results plot, fig.width=10, fig.height=4, echo = FALSE}
+plot(rf_ga_desirability) + theme_bw()
+```
+The output of the genetic algorithm feature selection is as follows. 
+```{r genetic algorithm results, echo = FALSE}
+rf_ga_desirability
+```
+
+The following 16 compositional and molecular descriptors were selected:
+```{r GA predictors, echo = FALSE}
+ga_predictors <- rf_ga_desirability$optVariables
+ga_predictors
+```
+### Random forest models employing selected predictors
+
+A random forest model employing the selected predictors was trained and evaluated on a randomly selected 70% and 30% of the training/testing data, respectively.
+```{r results dataframe, echo = FALSE}
+# Model performance dataframe
+model_performance_ga <- data.frame(matrix(ncol = 15, nrow = 20))
+colnames(model_performance_ga) <- c("Model", "AUC_training", "Accuracy_training", "Kappa_training", "Sensitivity_training", "Specificity_training", "Precision_training", "Fscore_training", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Fscore_testing")
+```
+
+```{r rf model - GA predictors}
+for (i in 1:20) {
+  model_performance_ga <- run_random_forest(TT_data,ga_predictors, model_performance_ga, "RF - GA predictors", i)
+}
+```
+
+```{r AUC averages, echo=FALSE}
+cat("The average AUC achieved by the random forest models (n = 20) on the training data was", round(mean(model_performance_ga$AUC_training),4), "±", round(sd(model_performance_ga$AUC_training),4), "\n")
+cat("The average AUC achieved by the random forest models (n = 20) on the testing data was", round(mean(model_performance_ga$AUC_testing), 4), "±", round(sd(model_performance_ga$AUC_testing),4), "\n")
+```
+
+
+```{r export, echo = FALSE}
+# Export results
+write.csv(ga_predictors, "Results/Selected predictors.csv", row.names = FALSE)
+write.csv(model_performance_ga, "Results/Model performance (genetic algortihm).csv", row.names = FALSE)
+```
