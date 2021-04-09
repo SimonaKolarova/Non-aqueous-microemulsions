@@ -1,0 +1,229 @@
+---
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, echo = FALSE}
+library(tidyverse)
+library(reshape)
+library(caret)
+library(e1071)
+library(randomForest)
+library(pROC)
+library(RColorBrewer)
+library(corrplot)
+```
+
+### Scripts
+```{r r scripts}
+source("Variable importance assessment.R", local = knitr::knit_global())
+source("Predictive performance assessment.R", local = knitr::knit_global())
+source("Statistical analysis.R", local = knitr::knit_global())
+```
+
+### Dataset
+```{r data}
+PB_predictors_data <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+```
+
+The dataset was split into a training/testing (`TT_data`) and validation subset comprising 21 and 7 phase diagrams, respectively. Only the training/testing dataset was used to determine the importance of the different predictors in the random forest models.
+```{r data splitting}
+TT_data <- filter(PB_predictors_data, Set == "Training")
+```
+
+A list of all phase behaviour predictor names was created and the phase behaviour variable was encoded as a factor.
+```{r data definitions}
+predictors_all <- colnames(TT_data[,3:66][,-(4:6)])
+TT_data$Phase.behaviour <- factor(as.character(TT_data$Phase.behaviour))
+```
+
+### Variables importance
+
+#### Determination of variables importance
+
+To quantify the importance of the different compositional and molecular descriptors, 20 random forest models comprising 50 decision trees each were trained using a randomly selected 70% of the `TT_data`, *i.e.*, the training data, and their predictive performance on the remaining 30% of the `TT_data`, *i.e.*, the testing data, as well as the *importance of each variable* in each structure was determined.
+
+```{r results dataframe, echo = FALSE}
+# Model performance and varirable importance dataframe
+model_performance_varimp <- data.frame(matrix(ncol = 76, nrow = 20))
+colnames(model_performance_varimp) <- c("Model", "AUC_training", "Accuracy_training", "Kappa_training", "Sensitivity_training", "Specificity_training", "Precision_training", "Fscore_training", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Fscore_testing", predictors_all)
+```
+
+```{r rf model - all predictors}
+for (i in 1:20) {
+  model_performance_varimp <- run_random_forest(TT_data, predictors_all, model_performance_varimp, "RF - all predictors", i)
+}
+```
+
+#### Comparison of variables importance
+To compare the overall importance of the different variables for the random forest models, the scalled importance of each variable was averaged over the 20 resampled runs.
+
+The results suggest that only three variables have an average scaled variable importance higher than 10: the PS, NPS and SPC concentration, *i.e.*, the variables that define the compostion of each nonaqueous sample.
+```{r top varImp melt, echo = FALSE}
+varimp_top_pred_melt <- melt(model_performance_varimp[-c(2:15,19:76)], value.name = "Model")
+```
+```{r top varImp plot, fig.width=10, fig.height=3, echo=FALSE}
+ggplot(varimp_top_pred_melt, aes(x = variable, y = value)) + 
+  geom_boxplot() + 
+  coord_flip() +
+  labs(x = "Predictor", y = "Scalled importance") +
+  ylim(0,100) +
+  theme_classic() +
+  theme(text = element_text(size=10))
+```
+The remaining 58 predictors, *i.e.*, the solvent molecular descriptors, all have an average scaled importance lower than 10. 
+```{r bottom varImp melt, echo = FALSE}
+varimp_bottom_pred_melt <- melt(model_performance_varimp[-c(2:18)], value.name = "Model")
+```
+
+```{r bottom varImp plot, fig.width=10, fig.height=12, echo=FALSE}
+ggplot(varimp_bottom_pred_melt, aes(x = variable, y = value)) + 
+  geom_boxplot() + 
+  coord_flip() +
+  labs(x = "Predictor", y = "Scalled importance") +
+  ylim(0,10) +
+  theme_classic() +
+  theme(text = element_text(size=10))
+```
+Despite the average scaled importance of all molecular descriptors being relatively low, many of the differences between their importances are statistically significant as illustrated in the binary plot below, where statistically significant differences (p ≤ 0.05) are shown as *1s* (Blue) and non-statistically significant differences (p > 0.05) as *-1s* (Red).
+
+```{r bottom varImp statistics, echo = FALSE, results = FALSE}
+varimp_statistics <- run_statistical_analysys(varimp_bottom_pred_melt, varimp_bottom_pred_melt$value, varimp_bottom_pred_melt$variable)
+
+# Create a binary dataframe
+varimp_statistics_df <- as.data.frame(varimp_statistics$p.value)
+
+varimp_statistics_df[varimp_statistics_df <= 0.05] <- 0
+varimp_statistics_df[varimp_statistics_df > 0.05] <- -1
+varimp_statistics_df[varimp_statistics_df == 0] <- 1
+varimp_statistics_df[is.na(varimp_statistics_df)] <- 0
+```
+
+```{r bottom varImp statistics plot, fig.width=10, fig.height=10, echo = FALSE}
+cols <- c(rev(brewer.pal(4, "Reds")), (brewer.pal(4, "Blues")))
+          
+corrplot::corrplot(as.matrix(varimp_statistics_df),
+                   order = c("original"),
+                   tl.cex =0.6,
+                   addgrid.col = rgb(1,1,1,.01),
+                   col = colorRampPalette(cols)(51),
+                   type = "lower")
+```
+Interestingly, the results suggest that the importance of *Yindex_dragon_NPS* is significantly higher than that of all the remaining molecular descriptors, while *ALOGP2_dragon_PS* has a significantly higher variable importance than all other polar solvent (PS) molecular descriptors.
+
+The predictors ranking by importance is as follows:
+```{r sorted varImp, echo = FALSE}
+# List of variables by variable importance 
+predictors_ordered_varimp <- as.data.frame(t(as.data.frame(map(model_performance_varimp[,16:76], mean))))
+predictors_ordered_varimp <- as.data.frame(t(as.data.frame(predictors_ordered_varimp[order(-predictors_ordered_varimp$V1), ,drop = FALSE])))
+predictors_ordered_varimp_list <- colnames(predictors_ordered_varimp)
+
+predictors_ordered_varimp_list
+```
+
+### Random forest employing predictor subsets selected using variable importance
+
+To determine the effect of using a subset of the variables of highest importance to train the models on the predictive performance of the random forest algorithm, models employing subsets of the highest *2x + 1* ranking variables (*x = 1 to 29*) were trained using the 70% of `TT_data` and evaluted on the remaining 30% of `TT_data` (n = 10).
+
+```{r results varImp dataframe, echo = FALSE}
+# Model performance dataframe
+model_performance_varimp_ordered_pred <- data.frame(matrix(ncol = 15, nrow = 290))
+colnames(model_performance_varimp_ordered_pred) <- c("Model", "AUC_training", "Accuracy_training", "Kappa_training", "Sensitivity_training", "Specificity_training", "Precision_training", "Fscore_training", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Fscore_testing")
+```
+```{r sorted varImp models}
+for (i in 1:29) {
+  for (j in 1:10) {
+    predictor_last = 2*i+1
+    model_number = (i-1)*10+j
+    model_name = paste("RF", predictor_last)
+    model_performance_varimp_ordered_pred <- run_random_forest(TT_data, predictors_ordered_varimp_list[1:predictor_last], model_performance_varimp_ordered_pred, model_name, model_number)
+  }
+}
+```
+#### Visual comparison
+```{r sorted varImp models plot, fig.width=10, echo=FALSE}
+ggplot(model_performance_varimp_ordered_pred, aes(x = Model)) + 
+  geom_boxplot(aes(y=AUC_training, colour = "AUC training")) + 
+  geom_boxplot(aes(y=AUC_testing, colour = "AUC testing")) +
+  scale_x_discrete(limits=paste("RF", seq(from = 3, to = 60, by = 2)))  +
+  ylim(0.75,1) +
+  labs(title = "Models trained using subsets of highest ranking variables",
+       x = "Model ('RF + number of highest ranking variables')",
+       y = "Area under the ROC curve (AUC)",
+       color = "Metric") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 8,angle=65, hjust=1),plot.title = element_text(hjust = 0.5))
+```
+
+#### Statistical comparison
+To help visualise the statistical significance of the differences in the generalisation abilities between the 29 random forest models, binary plot, where statistically significant differences (p ≤ 0.05) are shown as *1s* (Blue) and non-statistically significant differences (p > 0.05) as *-1s* (Red), were employed.
+
+##### Binary plot comparison of AUC values achieved on the training data by random forest models employing predictor subsets
+
+```{r sorted varImp training statistics, echo = FALSE, results = FALSE}
+varimp_statistics <- run_statistical_analysys(model_performance_varimp_ordered_pred, model_performance_varimp_ordered_pred$AUC_training, model_performance_varimp_ordered_pred$Model)
+
+# Create a binary dataframe
+varimp_statistics_df <- as.data.frame(varimp_statistics$p.value)
+
+varimp_statistics_df[varimp_statistics_df <= 0.05] <- 0
+varimp_statistics_df[varimp_statistics_df > 0.05] <- -1
+varimp_statistics_df[varimp_statistics_df == 0] <- 1
+varimp_statistics_df[is.na(varimp_statistics_df)] <- 0
+```
+```{r sorted varImp training statistics plot, fig.width=10, fig.height=10, echo = FALSE}
+corrplot::corrplot(as.matrix(varimp_statistics_df),
+                   order = c("original"),
+                   tl.cex =0.6,
+                   addgrid.col = rgb(1,1,1,.01),
+                   col = colorRampPalette(cols)(51),
+                   type = "lower")
+```
+
+##### Binary plot comparison of AUC values achieved on the testing data by random forest models employing predictor subsets
+```{r sorted varImp testing statistics, echo = FALSE, results = FALSE}
+varimp_statistics <- run_statistical_analysys(model_performance_varimp_ordered_pred, model_performance_varimp_ordered_pred$AUC_testing, model_performance_varimp_ordered_pred$Model)
+
+# Create a binary dataframe
+varimp_statistics_df <- as.data.frame(varimp_statistics$p.value)
+
+varimp_statistics_df[varimp_statistics_df <= 0.05] <- 0
+varimp_statistics_df[varimp_statistics_df > 0.05] <- -1
+varimp_statistics_df[varimp_statistics_df == 0] <- 1
+varimp_statistics_df[is.na(varimp_statistics_df)] <- 0
+```
+```{r sorted varImp testing statistics plot, fig.width=10, fig.height=10, echo = FALSE}
+corrplot::corrplot(as.matrix(varimp_statistics_df),
+                   order = c("original"),
+                   tl.cex =0.6,
+                   addgrid.col = rgb(1,1,1,.01),
+                   col = colorRampPalette(cols)(51),
+                   type = "lower")
+```
+
+**Overall, the above results suggest that employing subsets of compositional and molecular descriptors results in predominantly marginal changes in the predictive performance of the models on both the training and testing data.**
+
+**Nevertheless, there are some notable differences between the 29 models, which are listed below:**
+
+* Models employing the lowest number of highest ranking predictors (*i.e.*, 3 and 5) perform statistically significantly worse both on the training and testing data than the majority of the models employing more of the highest ranking predictors. 
+
+* The model employing 11 highest ranking predictor performs statistically significantly better on the training data than many of the other modeles employing more highest ranking predictors and also generalises the testing data well (it is the 9th highest ranking model by average AUC value).
+
+* The models employing 31 and 39 of the highest ranking predictors perform significantly better on the training data and somewhat worse on the testing data than many of the other investigated models, *i.e.*, they likely overfit the training data.
+
+* The model employing 53 of the highest ranking predictors perfoms (sometime significantly) worse on the training data than other models but has excellent generalisation abilities on the testing data (it is the 2nd highest ranking model by average AUC value).
+
+**Overall, the results did not allow for a single combination of predictors to be identified as optimal, however, they do suggest that there is room for improvement in the selection of features used to train the random forest models and potential for generalisation abilities imrpovement based on it.**
+
+
+```{r export, echo = FALSE}
+write.csv(predictors_ordered_varimp_list, "Results/Variables importance list.csv")
+write.csv(model_performance_varimp, "Results/Variables importance.csv", row.names = FALSE)
+write.csv(model_performance_varimp_pred, "Results/Model performance (top variable importance predictors).csv", row.names = FALSE)
+```
