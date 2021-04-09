@@ -1,0 +1,65 @@
+---
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, echo = FALSE}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(pROC)
+```
+
+### Scripts
+```{r r scripts}
+source("Random forest algorithm.R",local = knitr::knit_global())
+source("Predictive performance assessment.R", local = knitr::knit_global())
+```
+
+### Dataset
+```{r data}
+PB_predictors_data <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+```
+
+The dataset was split into a training/testing (`TT_data`) and validation subset comprising 21 and 7 phase diagrams, respectively. Only the training/testing dataset was used to train and evaluate the random forest models employng a reduced set of variables selected based on physico-chemical understanding of the nonaqueous SPC-stabilised systems.
+The phase behaviour variable was encoded as a factor.
+```{r data splitting}
+TT_data <- filter(PB_predictors_data, Set == "Training")
+TT_data$Phase.behaviour <- factor(as.character(TT_data$Phase.behaviour))
+```
+
+### Random forest models employing a predictor subset selected based on physico-chemical understanding of the nonaqeous SPC-stabilised systems
+#### Predictors subset
+A list of the 8 compositional and molecular descriptors previously identified as influential for the behaviour of nonaqueous SPC-stabilised systems was defined.
+```{r predictors definitions, echo = FALSE}
+predictors_pck <- c("PS.concentration", "NPS.concentration", "SPC.concentration", "Molecular.volume..A3._PS", "Hydrogen.Bond.Donor.Count_PS", "AmphM_PS", "Molecular.volume..A3._NPS", "nCconj_dragon_NPS")
+predictors_pck
+```
+#### Random forest training and evaluation
+A random forest model employing the selected predictors was trained and evaluated. 
+
+```{r results dataframe, echo = FALSE}
+# Model performance dataframe
+model_performance_pck <- data.frame(matrix(ncol = 15, nrow = 20))
+colnames(model_performance_pck) <- c("Model", "AUC_training", "Accuracy_training", "Kappa_training", "Sensitivity_training", "Specificity_training", "Precision_training", "Fscore_training", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Fscore_testing")
+```
+
+```{r rf model - GA predictors}
+for (i in 1:20) {
+  model_performance_se <- run_random_forest(TT_data, predictors_se, model_performance_se, "RF - PCK predictors", i)
+}
+```
+
+```{r AUC averages, echo=FALSE}
+cat("The average AUC achieved by the random forest models (n = 20) on the training wata was", round(mean(model_performance_pck$AUC_training),4), "±", round(sd(model_performance_pck$AUC_training),4), "\n")
+cat("The average AUC achieved by the random forest models (n = 20) on the testing wata was", round(mean(model_performance_pck$AUC_testing), 4), "±", round(sd(model_performance_pck$AUC_testing),4), "\n")
+```
+```{r export, echo = FALSE}
+# Export results
+write.csv(model_performance_pck, "Results/Model performance (physico-chemical knowledge).csv", row.names = FALSE)
+```
