@@ -37,7 +37,7 @@ TT_data$Phase.behaviour <- factor(as.character(TT_data$Phase.behaviour))
 #### Predictors subset
 A list of the 8 compositional and molecular descriptors previously identified as influential for the behaviour of nonaqueous SPC-stabilised systems was defined.
 ```{r predictors definitions, echo = FALSE}
-predictors_pck <- c("PS.concentration", "NPS.concentration", "SPC.concentration", "Molecular.volume..A3._PS", "Hydrogen.Bond.Donor.Count_PS", "AmphM_PS", "Molecular.volume..A3._NPS", "nCconj_dragon_NPS")
+predictors_pck <- c("PS.concentration", "NPS.concentration", "SPC.concentration", "AmphM_PS","Molecular.volume..A3._PS", "Hydrogen.Bond.Donor.Count_PS","Molecular.volume..A3._NPS", "nCconj_dragon_NPS")
 predictors_pck
 ```
 #### Random forest training and evaluation
@@ -51,13 +51,13 @@ colnames(model_performance_pck) <- c("Model", "AUC_training", "Accuracy_training
 
 ```{r rf model - GA predictors}
 for (i in 1:20) {
-  model_performance_se <- run_random_forest(TT_data, predictors_se, model_performance_se, "RF - PCK predictors", i)
+  model_performance_pck <- run_random_forest(TT_data, predictors_pck, model_performance_pck, "RF - PCK predictors", i)
 }
 ```
 
 ```{r AUC averages, echo=FALSE}
-cat("The average AUC achieved by the random forest models (n = 20) on the training wata was", round(mean(model_performance_pck$AUC_training),4), "±", round(sd(model_performance_pck$AUC_training),4), "\n")
-cat("The average AUC achieved by the random forest models (n = 20) on the testing wata was", round(mean(model_performance_pck$AUC_testing), 4), "±", round(sd(model_performance_pck$AUC_testing),4), "\n")
+cat("The average AUC achieved by the random forest models (n = 20) on the training data was", round(mean(model_performance_pck$AUC_training),4), "±", round(sd(model_performance_pck$AUC_training),4), "\n")
+cat("The average AUC achieved by the random forest models (n = 20) on the testing data was", round(mean(model_performance_pck$AUC_testing), 4), "±", round(sd(model_performance_pck$AUC_testing),4), "\n")
 ```
 ```{r export, echo = FALSE}
 # Export results
