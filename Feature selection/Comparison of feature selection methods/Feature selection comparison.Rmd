@@ -1,0 +1,176 @@
+---
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, echo = FALSE}
+library(tidyverse)
+library(reshape)
+library(ggpubr)
+library(caret)
+library(randomForest)
+library(pROC)
+```
+
+### Scripts
+```{r r scripts}
+source("Random forest algorithm.R",local = knitr::knit_global())
+source("Predictive performance assessment.R", local = knitr::knit_global())
+source("Statistical analysis.R", local = knitr::knit_global())
+```
+
+### Dataset
+```{r data}
+PB_predictors_data <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+```
+
+The dataset was split into a training/testing (`TT_data`) and validation (`V_data`) subset comprising 21 and 7 phase diagrams, respectively. To assess the influence of the predictors set on the random forest models, a random 70% and 30% of the `TT_data` was recursively selected to train and test the models (n=20), while the hold-out `V_data` was used to determine their generalisation abilibities to new data.
+```{r data splitting}
+TT_data <- filter(PB_predictors_data, Set == "Training")
+V_data <- filter(PB_predictors_data, Set == "Validation")
+```
+The phase behaviour variable in both datasets was encoded as a factor.
+```{r data factor}
+TT_data$Phase.behaviour <- factor(as.character(TT_data$Phase.behaviour))
+V_data$Phase.behaviour <- factor(as.character(V_data$Phase.behaviour))
+```
+
+
+### Predictor subsets
+The effect of employing four different sets of predictor to train the random forest models is assessed. 
+
+These four sets of predictors are:
+
+* All available predictors after data preprocessing, _i.e._, the following 61 descriptors:
+```{r all predictors, echo = FALSE}
+predictors_all <- colnames(TT_data[, 3:66][, -(4:6)])
+predictors_all
+```
+
+* The 35 predictors of highest variable importance, based on which the random forest model structure with highest prediction accuracy on testing data was obtained:
+```{r varimp predictors, echo = FALSE}
+predictors_varimp <- read.csv("Data/Variables importance list.csv")$Variable[1:35]
+predictors_varimp
+```
+
+* The 16 predictor selected using a genetic algorithm:
+```{r ga predictors, echo = FALSE}
+predictors_ga <- read.csv("Data/GA predictors.csv")$Variable
+predictors_ga
+```
+* The 8 predictors previously identified based on physico-chemical knowledge of the nonaqueous SPC-stabilised systems.
+```{r pck predictors, echo = FALSE}
+predictors_pck <- c("PS.concentration", "NPS.concentration", "SPC.concentration", "AmphM_PS","Molecular.volume..A3._PS", "Hydrogen.Bond.Donor.Count_PS","Molecular.volume..A3._NPS", "nCconj_dragon_NPS")
+predictors_pck
+```
+
+### Random forest models training and evaluation
+20 random forest models employing each of the four predictor sets was trained and evaluated. 
+
+```{r results dataframe, echo = FALSE}
+# Model performance dataframe
+model_performance_comparison <- data.frame(matrix(ncol = 22, nrow = 80))
+colnames(model_performance_comparison) <- c("Model", "AUC_training", "Accuracy_training", "Kappa_training", "Sensitivity_training", "Specificity_training", "Precision_training", "Fscore_training", "AUC_testing", "Accuracy_testing", "Kappa_testing", "Sensitivity_testing", "Specificity_testing", "Precision_testing", "Fscore_testing", "AUC_validation", "Accuracy_validation", "Kappa_validation", "Sensitivity_validation", "Specificity_validation", "Precision_validation", "Fscore_validation")
+```
+
+```{r rf models}
+for (i in 1:20) {
+  model_performance_comparison <- run_random_forest(TT_data, V_data, predictors_all, model_performance_comparison, "RF - all predictors", i)
+}
+for (i in 21:40) {
+  model_performance_comparison <- run_random_forest(TT_data, V_data, predictors_varimp, model_performance_comparison, "RF - Variable importance selection", i)
+}
+for (i in 41:60) {
+  model_performance_comparison <- run_random_forest(TT_data, V_data, predictors_ga, model_performance_comparison, "RF - Genetic algorithm selection", i)
+}
+for (i in 61:80) {
+  model_performance_comparison <- run_random_forest(TT_data, V_data, predictors_pck, model_performance_comparison, "RF - Physico-chemical selection", i)
+}
+```
+
+### Random forest models performance comparison
+**Visual comparison** <br>
+The predictive perfromance of the four models on the training, testing and hold-out validation data subsets was visually assessed using the various perfromance metrics.
+```{r melt, echo = FALSE}
+model_performance_melt_training <- melt(model_performance_comparison[-c(9:22)], value.name = "Model")
+model_performance_melt_testing <- melt(model_performance_comparison[-c(2:8,16:22)], value.name = "Model")
+model_performance_melt_validation<- melt(model_performance_comparison[-c(2:15)], value.name = "Model")
+```
+
+```{r models plot, fig.height=8, fig.width=10, echo=FALSE}
+pp_training <- ggplot(model_performance_melt_training, aes(x = Model, y = value,  color = Model)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  scale_x_discrete(limits=c("RF - all predictors", "RF - Variable importance selection", "RF - Genetic algorithm selection", "RF - Physico-chemical selection"))  +
+  ylim(0.995,1) +
+  labs(title = "Predictive performance of different random forest models on the training data", y = "Performance") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic() + 
+  theme(axis.text.x = element_blank(), axis.title.x=element_blank(), axis.ticks.x=element_blank(),
+        plot.title = element_text(hjust = 0.5), 
+        legend.position = "none")
+
+pp_testing <- ggplot(model_performance_melt_testing, aes(x = Model, y = value,  color = Model)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  scale_x_discrete(limits=c("RF - all predictors", "RF - Variable importance selection", "RF - Genetic algorithm selection", "RF - Physico-chemical selection"))  +
+  ylim(0.9,1) +
+  labs(title = "Predictive performance of different random forest models on the training data",
+       y = "Performance") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic() + 
+  theme(axis.text.x = element_blank(), axis.title.x=element_blank(), axis.ticks.x=element_blank(),
+        plot.title = element_text(hjust = 0.5), 
+        legend.position = "none")
+
+pp_validation <- ggplot(model_performance_melt_validation, aes(x = Model, y = value,  color = Model)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  scale_x_discrete(limits=c("RF - all predictors", "RF - Variable importance selection", "RF - Genetic algorithm selection", "RF - Physico-chemical selection"))  +
+  ylim(0.6,1) +
+  labs(title = "Predictive performance of different random forest models on the validation data",
+       y = "Performance") +
+  scale_color_brewer(palette = "Set1") +
+  theme_classic() + 
+  theme(axis.text.x = element_blank(), axis.title.x=element_blank(), axis.ticks.x=element_blank(),
+        plot.title = element_text(hjust = 0.5), 
+        legend.position = "bottom")
+
+ggarrange(pp_training, pp_testing, pp_validation, nrow = 3, ncol = 1)
+```
+
+The results suggest that the four random forest structures perform similarly on the training, testing and validation data, however, they all appear to overfit to the training data and exhibit significantly reduced ability to generalize to the hold-out validation data.
+
+**Statistical comparison using AUC metric** <br>
+To select the optimum model for the phase behaviour classification problem, the area under the receiver operating characteristic (ROC) curve (AUC) for the predictions on the training, testing and validation data was compared.
+<br><br>
+*Comparison of AUC values obtained on the training data*
+```{r models training statistics, echo = FALSE}
+run_statistical_analysys(model_performance_comparison, model_performance_comparison$AUC_training, model_performance_comparison$Model)
+```
+*Comparison of AUC values obtained on the testing data*
+```{r models testing statistics, echo = FALSE}
+run_statistical_analysys(model_performance_comparison, model_performance_comparison$AUC_testing, model_performance_comparison$Model)
+```
+*Comparison of AUC values obtained on the validation data*
+```{r models validation statistics, echo = FALSE}
+run_statistical_analysys(model_performance_comparison, model_performance_comparison$AUC_validation, model_performance_comparison$Model)
+```
+
+<br>
+
+**The results suggest that the four random forest models perform similarly on the training/testing dataset (there are no significant differences between the groups). Nevertheless, there are some statistically significant differences between the AUC values of the models on the hold-out validation data. Specifically, the random forests employing all 61 predictors or the 35 predictors subset selected based on variable importance appear to outperform the models employing 16 or 8 predictors seleced based on the genetic algorithm and physico-chemical knowledge, respectively. These results suggest that it is likely that the smaller predictor sets have omitted improtant phase behaviour predictors.**
+
+**Overall, the results suggest that all random forest models overfit the training dataset (average AUC across the models of 0.9997 ± 0.0003), thereby loosing generalization ability to the hold-out validation data (average AUC of 0.8372 ± 0.0190).**
+
+**The full predictor set was carried forward for model validation, however, work on identifying a suitable feature subset is still ongoing as preliminary results shown that the AUC on the hold-out validation data can be increased to as high as 0.91.**
+
+```{r export, echo = FALSE}
+# Export results
+write.csv(model_performance_comparison, "Results/Model performance (feature selection methods comparison).csv", row.names = FALSE)
+```
