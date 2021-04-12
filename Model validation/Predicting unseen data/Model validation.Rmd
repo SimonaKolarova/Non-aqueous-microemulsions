@@ -1,0 +1,126 @@
+---
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, echo = FALSE}
+library(tidyverse)
+library(reshape)
+library(ggpubr)
+library(caret)
+library(randomForest)
+library(pROC)
+```
+
+### Scripts
+```{r r scripts}
+source("Random forest algorithm.R", local = knitr::knit_global())
+source("Predictive performance assessment.R", local = knitr::knit_global())
+```
+
+### Dataset
+```{r data}
+PB_predictors_data <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+```
+The dataset was split into a training/testing (`TT_data`) and validation (`V_data`) subset comprising 21 and 7 phase diagrams, respectively. To assess the performance of the selected random forest model structure on unseen data, the `TT_data` was used to train 20 models, while the hold-out `V_data` was used to determine each of the model's generalisation abilibities.
+```{r data splitting}
+TT_data <- filter(PB_predictors_data, Set == "Training")
+V_data <- filter(PB_predictors_data, Set == "Validation")
+```
+The phase behaviour variable in both datasets was encoded as a factor and a list of of phase behaviour predictor names was created.
+```{r data factor}
+TT_data$Phase.behaviour <- factor(as.character(TT_data$Phase.behaviour))
+V_data$Phase.behaviour <- factor(as.character(V_data$Phase.behaviour))
+
+predictors_all<-colnames(TT_data[,3:66][,-(4:6)])
+```
+
+### Validation data types
+First, the different types of validation phase diagrams (*i.e.*, phase diagrams of systems comprising a previously unseen polar solvent, non-polar solvent or both) and phase behaviour data points (*i.e.* boundary or non-boundary) were defined.
+
+```{r validation phase digrams types}
+seen_PS <-unique(TT_data$PS)
+seen_NPS <-unique(TT_data$NPS)
+V_data_unseen_PS <- filter(V_data, !(V_data$PS %in% seen_PS), V_data$NPS %in% seen_NPS)
+V_data_unseen_NPS <- filter(V_data, V_data$PS %in% seen_PS, !(V_data$NPS %in% seen_NPS))
+V_data_unseen_PS_NPS <- filter(V_data, !(V_data$PS %in% seen_PS), !(V_data$NPS %in% seen_NPS))
+```
+
+```{r validation data types}
+V_data_boundary <- filter(V_data, Phase.boundary == "Boundary")
+V_data_nonboundary <- filter(V_data, Phase.boundary == "Non-boundary")
+```
+
+### Random forest model training and evaluation
+Next, 20 random forest models were trained using the whole `TT_data` dataset and all 61 preprocessed predictors and their performance on the whole `V_data` dataset, as well as on the 5 different `V_data` subsets defined above, was separately assessed. 
+```{r results dataframe, echo = FALSE}
+# Model performance dataframe
+model_performance_validation <- data.frame(matrix(ncol = 8, nrow = 120))
+colnames(model_performance_validation) <- c("Validation_data", "AUC", "Accuracy", "Kappa", "Sensitivity", "Specificity", "Precision", "Fscore")
+```
+
+```{r random forest run}
+for (i in seq(1, 120, by = 6)) {
+  rf_model <- run_random_forest(TT_data, predictors_all)
+  model_performance_validation <- model_performance_assessment(V_data, model_performance_validation, rf_model, "Overall", i)
+  model_performance_validation <- model_performance_assessment(V_data_boundary, model_performance_validation, rf_model, "Boundary", i+1)
+  model_performance_validation <- model_performance_assessment(V_data_nonboundary, model_performance_validation, rf_model, "Non-boundary", i+2)
+  model_performance_validation <- model_performance_assessment(V_data_unseen_PS, model_performance_validation, rf_model, "Unseen PS", i+3)
+  model_performance_validation <- model_performance_assessment(V_data_unseen_NPS, model_performance_validation, rf_model, "Unseen NPS", i+4)
+  model_performance_validation <- model_performance_assessment(V_data_unseen_PS_NPS, model_performance_validation, rf_model, "Unseen PS and NPS", i+5)
+}
+```
+### Predictive performance comparison
+The predictive performance of the random forests on the whole hold-out validation data, as well as on the 5 validation data subsets, was compared visually. <br><br>
+
+```{r melt, echo = FALSE}
+model_performance_melt <- melt(model_performance_validation, value.name = "Validation_data")
+```
+
+```{r boundary plot, fig.height=4, fig.width=10, echo=FALSE}
+ggplot(model_performance_melt, aes(x = Validation_data, y = value,  color = Validation_data)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  #Layout
+  ylim(0.3,1) +
+  scale_x_discrete(limits=c("Overall", "Boundary", "Non-boundary"))  +
+  scale_y_continuous(breaks = seq(0.3, 1, 0.1)) +  
+  scale_color_brewer(palette = "Set1") +
+  labs(title = "Predictive performance on validation data by boundary type", y = "Performance", color = "Validation data subset") +
+  theme_classic() + 
+  theme(axis.text.x = element_blank(), axis.title.x=element_blank(), axis.ticks.x=element_blank(),
+        plot.title = element_text(hjust = 0.5), 
+        legend.position = "bottom")
+```
+
+The comparison suggests that the predictive performance of the random forest models is significantly better on data points that are *not* in the "boundary" region (AUC = 0.899 ± 0.010) than on ones that are (AUC = 0.669 ± 0.005). This suggests that the models can generalise the shape on phase diagrams comprising unseen solvents relatively well, however, they have difficulty identifying the exact position of the the phase boundaries. <br><br><br>
+
+```{r phase diagram type plot, fig.height=4, fig.width=10, echo=FALSE}
+ggplot(model_performance_melt, aes(x = Validation_data, y = value,  color = Validation_data)) + 
+  geom_boxplot() +
+  facet_grid(cols = vars(variable)) +
+  #Layout
+  ylim(0.4,1) +
+  scale_x_discrete(limits=c("Overall", "Unseen PS", "Unseen NPS", "Unseen PS and NPS"))  +
+  scale_y_continuous(breaks = seq(0.4, 1, 0.1)) +  
+  scale_color_brewer(palette = "Set1") +
+  labs(title = "Predictive performance on validation data by phase diagram type", y = "Performance", color = "Validation data subset") +
+  theme_classic() + 
+  theme(axis.text.x = element_blank(), axis.title.x=element_blank(), axis.ticks.x=element_blank(),
+        plot.title = element_text(hjust = 0.5), 
+        legend.position = "bottom")
+```
+
+The comparison suggests that the predictions on phase diagrams of systems comprising only an unseen non-polar solvent (NPS) are significantly more accurate (AUC = 0.935 ± 0.011) than those on phase diagrams of systems comprising an unseen polar solvent (PS) either in a combination with a seen or unseen NPS (AUC = 0.752 ± 0.017 and 0.796 ± 0.006, respectively). This points to the more complex influence of PS on the behaviour of the systems and is area of the project, for which imrpovements are currently under way.
+
+
+```{r export, echo = FALSE}
+# Export results
+write.csv(model_performance_validation, "Results/Model performance (validation data).csv", row.names = FALSE)
+
+```
