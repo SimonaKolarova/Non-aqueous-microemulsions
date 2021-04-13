@@ -1,0 +1,243 @@
+---
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, cache = TRUE, warning=FALSE, message=FALSE)
+```
+
+```{r libraries, echo = FALSE}
+library(tidyverse)
+library(reshape)
+library(ggpubr)
+library(caret)
+library(randomForest)
+library(pROC)
+```
+
+### Scripts
+```{r r scripts}
+source("Conformal predictions.R", local = knitr::knit_global())
+source("ConformalClassification.R", local = knitr::knit_global()) # 'conformal' library (available only for older R versions)
+```
+
+### Dataset
+```{r data}
+PB_predictors_data <- read.csv("Data/Phase behaviour and descriptors (25 pc step).csv")
+```
+The dataset was split into a training/testing (`TT_data`) and validation (`V_data`) subset comprising 21 and 7 phase diagrams, respectively. To assess the performance of the selected random forest model on unseen data, the `TT_data` was used to train the model, while the hold-out `V_data` was used to determine the model's generalisation abilibities.
+```{r data splitting}
+TT_data <- filter(PB_predictors_data, Set == "Training")
+V_data <- filter(PB_predictors_data, Set == "Validation")
+```
+The phase behaviour variable in both datasets was encoded as a factor and a list of of phase behaviour predictor names was created.
+```{r data factor}
+TT_data$Phase.behaviour <- factor(as.character(TT_data$Phase.behaviour))
+V_data$Phase.behaviour <- factor(as.character(V_data$Phase.behaviour))
+
+predictors_all<-colnames(TT_data[,3:66][,-(4:6)])
+```
+
+### Random forest model
+A single random forest model was trained using the whole `TT_data` dataset and all 61 preprocessed predictors.
+
+The random forest comprised 100 decision trees (instead of the 50 used during feature selection and model validation) as conformal prediction values are calculated as a fraction based on the 'votes' from individual trees and 100 trees offer a more nuanced understanding of the distribution of these votes than 50 trees. This change is not expected to significantly alter the overall predictive perfromance of the model as suggested by the results of the comparison between these two model structures drawn previously  (*cf.* selection of number of decision trees).
+
+```{r random forest run}
+rf_model <- run_random_forest(TT_data, predictors_all)
+saveRDS(rf_model, file = "Results/Random_forest_model.rds")
+```
+
+### Confidence level (CL) selection
+#### First screening of CL
+Confidence levels between 0.75 and 1 were explored to determine the range of confidence levels, at which the highest fraction of single class predictions of accuracy higher than the corresponding CL is obtained. Predictions were classified as true positive (TP), ture negative (TN), false postive (FP), false negative (FN), ambigious or nonconforming (None), where the positive class in "microemulsion" and the negative class is "non-microemulsion".
+
+```{r confidence levels first, echo = FALSE}
+CL_list_first <- seq(0.75, 1, by = 0.05)
+```
+
+```{r results dataframe first, echo = FALSE}
+# Conformal predictions dataframe
+cp_first <- data.frame(matrix(ncol = 10, nrow = length(CL_list_first)))
+colnames(cp_first) <- c("Confidence_level", "TP", "TN", "FP", "FN", "Ambiguous", "None", "Accuracy", "Sensitivity", "Specificity")
+```
+
+```{r conformal prediction run first}
+for (i in 1:length(CL_list_first)) {
+  cp_first <- run_conformal_prediction(V_data, rf_model, cp_first, CL_list_first[i], i)
+}
+```
+
+**Visual comparison of predictions at differnet confidence levels (first screening)** <br>
+```{r confromal predictions plot first, fig.height=4, fig.width=10, echo = FALSE}
+# Data melt
+cp_first_predictions <- melt(cp_first[,1:7], id.vars="Confidence_level")
+
+#Plot
+ggplot(cp_first_predictions) + 
+  # Bar and line plots
+  geom_bar(aes(x=Confidence_level, y=value, fill=variable), 
+          position = "fill", stat="identity") +
+  geom_line(data=cp_first, 
+            aes(x=cp_first$Confidence_level, y= cp_first$Accuracy, color = "Accuracy"), size = 1.3) +
+  geom_line(data=cp_first, 
+          aes(x=cp_first$Confidence_level, y= cp_first$Sensitivity, color = "Sensitivity"), size = 1.3) +
+  geom_line(data=cp_first, 
+          aes(x=cp_first$Confidence_level, y= cp_first$Specificity, color = "Specificity"), size = 1.3) +
+  
+  #Layout
+  scale_x_continuous(breaks = seq(0.75, 1, 0.05)) +  
+  labs(x = "Confidence level", y = "Fraction", fill = "Prediction type", color = "Metrics for confident single class predictions") +
+  scale_fill_brewer(palette = "Paired") +
+  scale_color_brewer(palette = "Oranges") +
+  theme_classic()
+```
+
+The results suggest that the optimum confidence level is in the range between CL = 0.90 and CL = 0.99.
+
+#### Second screening of CL
+Hence, confidence levels between 0.90 and 0.99 were explored to determine the single optimum CL, at which the highest fraction of single class predictions of accuracy higher than CL is obtained. Again, predictions were classified as true positive (TP), ture negative (TN), false postive (FP), false negative (FN), ambigious or nonconforming (None), where the positive class in "microemulsion" and the negative class is "non-microemulsion".
+
+```{r confidence levels second, echo = FALSE}
+CL_list_second <- seq(0.9, 0.99, by = 0.01)
+```
+
+```{r results dataframe second, echo = FALSE}
+# Conformal predictions dataframe
+cp_second <- data.frame(matrix(ncol = 10, nrow = length(CL_list_second)))
+colnames(cp_second) <- c("Confidence_level", "TP", "TN", "FP", "FN", "Ambiguous", "None", "Accuracy", "Sensitivity", "Specificity")
+```
+
+```{r conformal prediction run second}
+for (i in 1:length(CL_list_second)) {
+  cp_second <- run_conformal_prediction(V_data, rf_model, cp_second, CL_list_second[i], i)
+}
+```
+
+**Visual comparison of predictions at diffeent confidence levels (second screening)** <br>
+```{r confromal predictions plot second, fig.height=4, fig.width=10, echo = FALSE}
+# Data melt
+cp_second_predictions <- melt(cp_second[,1:7], id.vars="Confidence_level")
+
+#Plot
+ggplot(cp_second_predictions) + 
+  # Bar and line plots
+  geom_bar(aes(x=Confidence_level, y=value, fill=variable), 
+          position = "fill", stat="identity") +
+  geom_line(data=cp_second, 
+            aes(x=cp_second$Confidence_level, y= cp_second$Accuracy, color = "Accuracy"), size = 1.3) +
+  geom_line(data=cp_second, 
+          aes(x=cp_second$Confidence_level, y= cp_second$Sensitivity, color = "Sensitivity"), size = 1.3) +
+  geom_line(data=cp_second, 
+          aes(x=cp_second$Confidence_level, y= cp_second$Specificity, color = "Specificity"), size = 1.3) +
+  
+  #Layout
+  scale_x_continuous(breaks = seq(0.9, 1, 0.01)) +  
+  labs(x = "Confidence level", y = "Fraction", fill = "Prediction type", color = "Metrics for confident single class predictions") +
+  scale_fill_brewer(palette = "Paired") +
+  scale_color_brewer(palette = "Oranges") +
+  theme_classic()
+```
+
+The optimum CL level was identified to be 0.94, at which the accuracy of single class predictions is 0.951 and the CP efficiency, *i.e.*, the fraction of single class predictions, is 0.620.
+
+### Validation data predictions at selected CL
+Finally, the conformal prediction of the validation data at the identified as optimum CL of 0.94 were obtained. 
+
+```{r conformal predictions}
+cp_final <- run_conformal_prediction_for_predictions(V_data, rf_model, 0.94)
+```
+The distribution of the different types of predictions (true positive, true negative *etc.*) among the different phase behaviour data types (*i.e.*, boundary or non-boundary) and validation phase diagram types (*i.e.*, phase diagrams of systems comprising a previously unseen polar solvent, non-polar solvent or both) is assessed below.
+
+**Confromal prediction on validation data by boundary type**
+
+```{r cp final boundary plot, fig.width = 10, fig.height = 4, echo = FALSE}
+# Data
+cp_final_nonboundary <- filter(cp_final, Phase_boundary == "Non-boundary")
+cp_final_boundary <- filter(cp_final, Phase_boundary == "Boundary")
+
+# Plot (non-boundary data)
+cp_nonboundary <- ggplot(cp_final_nonboundary) + 
+  geom_bar(aes(x=Type_prediction, y = (..count..)/sum(..count..)),  fill="steelblue") +
+
+  # Layout
+  labs(title = "Non-boundary validation data", x = "Prediction type", y = "Fraction") +
+  scale_x_discrete(limits=c("True Positive", "True Negative", "False Positive", "False Negative", "Ambiguous", "Nonconforming")) +
+  ylim(0,0.6) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10,angle=65, hjust=1),plot.title = element_text(hjust = 0.5))
+
+# Plot (boundary data)
+cp_boundary <- ggplot(cp_final_boundary) + 
+  geom_bar(aes(x=Type_prediction, y = (..count..)/sum(..count..)),  fill="red3") +
+
+  # Layout
+  labs(title = "Boundary validation data", x = "Prediction type", y = "Fraction") +
+  scale_x_discrete(limits=c("True Positive", "True Negative", "False Positive", "False Negative", "Ambiguous", "Nonconforming")) +
+  ylim(0,0.6) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10,angle=65, hjust=1),plot.title = element_text(hjust = 0.5))
+
+
+ggarrange(cp_nonboundary, cp_boundary, nrow = 1, ncol = 2)
+```
+The comparison suggests that the conformal prediction on data points that are in the "non-boundary" region is significantly more accurate and efficient than that on data in the "boundary" region. This supports the previous observation that the random forest models can generalise the shape of phase diagrams comprising unseen solvents relatively well, however, they have difficulty identifying the exact position of the the phase boundaries.
+
+**Confromal prediction on validation data by phase diagram type**
+
+```{r cp final phase diagram plot, fig.width = 10, fig.height = 4, echo = FALSE}
+# Data
+seen_PS <- unique(TT_data$PS)
+seen_NPS <- unique(TT_data$NPS)
+cp_final_unseen_PS <- filter(cp_final, !(cp_final$PS %in% seen_PS), cp_final$NPS %in% seen_NPS)
+cp_final_unseen_NPS <- filter(cp_final, cp_final$PS %in% seen_PS, !(cp_final$NPS %in% seen_NPS))
+cp_final_unseen_PS_NPS <- filter(cp_final, !(cp_final$PS %in% seen_PS), !(cp_final$NPS %in% 
+    seen_NPS))
+
+# Plot (unseen PS)
+cp_unseen_PS <- ggplot(cp_final_unseen_PS) + 
+  geom_bar(aes(x=Type_prediction, y = (..count..)/sum(..count..)),  fill="steelblue") +
+
+  # Layout
+  labs(title = "Unseen polar solvent", x = "Prediction type", y = "Fraction") +
+  scale_x_discrete(limits=c("True Positive", "True Negative", "False Positive", "False Negative", "Ambiguous", "Nonconforming")) +
+  ylim(0,0.6) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10,angle=65, hjust=1),plot.title = element_text(hjust = 0.5))
+
+# Plot (unseen NPS)
+cp_unseen_NPS <- ggplot(cp_final_unseen_NPS) + 
+  geom_bar(aes(x=Type_prediction, y = (..count..)/sum(..count..)),  fill="red3") +
+
+  # Layout
+  labs(title = "Unseen non-polar solvent", x = "Prediction type", y = "Fraction") +
+  scale_x_discrete(limits=c("True Positive", "True Negative", "False Positive", "False Negative", "Ambiguous", "Nonconforming")) +
+  ylim(0,0.6) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10,angle=65, hjust=1),plot.title = element_text(hjust = 0.5))
+
+# Plot (unseen PS and NPS)
+cp_unseen_PS_NPS <- ggplot(cp_final_unseen_PS_NPS) + 
+  geom_bar(aes(x=Type_prediction, y = (..count..)/sum(..count..)),  fill="darkolivegreen4") +
+
+  # Layout
+  labs(title = "Unseen polar and non-polar solvent", x = "Prediction type", y = "Fraction") +
+  scale_x_discrete(limits=c("True Positive", "True Negative", "False Positive", "False Negative", "Ambiguous", "Nonconforming")) +
+  ylim(0,0.6) +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 10,angle=65, hjust=1),plot.title = element_text(hjust = 0.5))
+
+
+ggarrange(cp_unseen_PS, cp_unseen_NPS, cp_unseen_PS_NPS, nrow = 1, ncol = 3)
+```
+
+The comparison suggests that the conformal prediction on phase diagrams of systems comprising only an unseen non-polar solvent (NPS) are significantly more accurate and efficient than those on phase diagrams of systems comprising an unseen polar solvent (PS), which, in turn, are slightly more accurate and efficint than those on phase diagrams comprising both an unseen PS and NPS. This points to the more complex influence of PS on the behaviour of the systems and is an area of the project, for which improvements are currently under way.
+
+```{r export, echo = FALSE}
+# Export results
+write.csv(cp_first, "Results/Conformal predictions (first).csv", row.names = FALSE)
+write.csv(cp_second, "Results/Conformal predictions (second).csv", row.names = FALSE)
+write.csv(cp_final, "Results/Conformal predictions (final).csv", row.names = FALSE)
+```
