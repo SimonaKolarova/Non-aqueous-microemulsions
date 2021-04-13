@@ -1,8 +1,7 @@
-## Non-aqueous-microemulsions
-	Background:
-Microemulsions are stable dispersions of oil and water in the presence of one or more amphiphiles and possess a number of desirable formulation properties, such as long-term stability, clarity, modifiable viscosity, and ability to solubilize hydrophilic and/or lipophilic materials. These characteristics make them excellent vehicles for active materials delivery and have fostered their applications in the fields of oil extraction, nanoparticle synthesis, wastewater treatment, enzyme catalysis and cosmetics formulation. Nonetheless, few commercial food- and drug-grade microemulsions have been developed over the years, which can be mainly attributed to toxicity and biocompatibility issues, stemming from the need to employ high surfactant concentrations and/or cosurfactants to promote microemulsification, and the use of poorly biodegradable hydrocarbons as oils.
+# Phase behaviour predictive modelling 
 
-To advance the development of biocompatible microemulsions, we previously explored the microemulsification of systems stabilised by the food/drug-grade lipid soybean phosphatidylcholine (SPC) and incorporating solely generally regarded as safe (GRAS) nonaqueous solvents.The ability of such nonaqueous SPC-stabilised mixtures to form microemulsions is strongly influenced by the properties of both the PS and the oil, i.e. the non-polar solvent (NPS), employed. However, identifying biocompatible solvents, which are capable of supporting the desired SPC nanostructures, is an expensive and experimentally demanding process and can significantly hinder the future applications of the systems. 
+Development of a machine learning model for the reliable prediction of microemulsion formation in ternary nonaqueous systems stabilised by soybean phosphatidylcholine and comprising a variety of polar and non-polar solvents.
 
-	Aim: 
-To reduce the time and cost associated with microemulsion component selection,the aim of our study is to develop a ML model capable of reliably predicting the formation of microemulsions in ternary nonaqueous systems stabilised by SPC and employing a variety of PS and NPS.
+This work was carried out as a part of my PhD research into the formation and properties of nonaqeous microemulsions stabilised by soybean phosphatidylcholine and their applications as active ingredient delivery systems in toothpaste formulations. The research was supported by an EPSRC CASE award in partnership between King's College London and GSK Consumer Healthcare R&D. 
+
+For more information about the project visit my [personal page](https://simonakolarova.github.io/Phase_behaviour_predictive_modelling.html).
